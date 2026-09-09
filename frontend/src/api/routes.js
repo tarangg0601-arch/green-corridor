@@ -1,0 +1,12 @@
+import axios from 'axios';
+import { API_BASE_URL } from '../config';
+
+export const fetchRoutes = async () => {
+  const response = await axios.get(`${API_BASE_URL}/routes`);
+  return response.data;
+};
+
+export const fetchRoute = async (id) => {
+  const response = await axios.get(`${API_BASE_URL}/routes/${id}`);
+  return response.data;
+};
