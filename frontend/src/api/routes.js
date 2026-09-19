@@ -10,3 +10,8 @@ export const fetchRoute = async (id) => {
   const response = await axios.get(`${API_BASE_URL}/routes/${id}`);
   return response.data;
 };
+
+export const createCustomRoute = async (data) => {
+  const response = await axios.post(`${API_BASE_URL}/routes/custom`, data);
+  return response.data;
+};
