@@ -16,7 +16,8 @@ function initializeSchema(db) {
     name TEXT NOT NULL,
     start_name TEXT NOT NULL,
     end_name TEXT NOT NULL,
-    polyline TEXT NOT NULL
+    polyline TEXT NOT NULL,
+    is_custom INTEGER DEFAULT 0
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS signals (
