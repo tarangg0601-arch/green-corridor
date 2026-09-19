@@ -69,9 +69,23 @@
 - Centralized config with environment variable overrides
 - SQLite database with auto-initialization and seeding
 
+### ✅ Custom Route Creation
+- Geocodes user-provided start/end addresses using Nominatim API (with in-memory caching and rate-limiting)
+- Generates real driving routes dynamically using the OSRM public routing API
+- Automatically plots virtual traffic signals along the route (every ~900m)
+- UI seamlessly toggles between predefined routes and on-the-fly custom ones
+- OSRM attribution included on the frontend per their usage policy
+
 ---
 
 ## Extension Points
+
+### Overpass API for Real Traffic Signals
+> Instead of generating virtual traffic signals at fixed intervals for custom routes, query OpenStreetMap for actual traffic signal nodes:
+> - Integrate with the free Overpass API
+> - Query for `node["highway"="traffic_signals"]` along the calculated OSRM polyline
+> - Map these real signal coordinates into the `signals` table for a hyper-realistic simulation
+> - File to modify: `backend/src/services/routingService.js`
 
 ### Multi-Ambulance Conflict Resolution
 > When two ambulances approach the same signal from different routes, a priority conflict arises. To handle this:
@@ -86,13 +100,6 @@
 > - Modify `simulationService.js` to accept external position updates instead of computing them
 > - The ETA service works the same way — it only needs current position and route
 > - File to modify: `backend/src/services/simulationService.js`
-
-### Dynamic Route Planning
-> Instead of predefined routes, calculate routes dynamically:
-> - Integrate with OSRM or GraphHopper for route calculation
-> - Accept start/end coordinates and get the optimal route polyline
-> - Automatically detect signals along the calculated route
-> - File to modify: `backend/src/controllers/tripController.js` (the `start` handler)
 
 ### Traffic Density Awareness
 > Factor in current traffic conditions to improve ETA accuracy:
