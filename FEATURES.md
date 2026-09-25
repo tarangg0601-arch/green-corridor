@@ -76,6 +76,16 @@
 - UI seamlessly toggles between predefined routes and on-the-fly custom ones
 - OSRM attribution included on the frontend per their usage policy
 
+### ✅ Emergency Ambulance Dispatch (Two-Leg Routing)
+- "Call Ambulance" flow that accepts an emergency pickup address.
+- Geocodes the emergency location and identifies the nearest idle ambulance and the nearest hospital.
+- Automatically calculates a two-leg journey:
+  - **Leg 1**: Routes the ambulance from its current base to the emergency pickup location.
+  - **Pickup Phase**: Simulates a 15-second delay at the scene.
+  - **Leg 2**: Routes the ambulance from the pickup location to the destination hospital.
+- Auto-generates virtual traffic signals for both legs.
+- UI displays current trip phases (e.g., "En route to pickup", "At pickup location", "En route to hospital") and the destination hospital name.
+
 ---
 
 ## Extension Points
