@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import MapView from '../components/Map/MapView';
 import TripList from '../components/Sidebar/TripList';
 import StartTripForm from '../components/Sidebar/StartTripForm';
+import CallAmbulanceForm from '../components/Sidebar/CallAmbulanceForm';
 import AlertPanel from '../components/Alerts/AlertPanel';
 import { useSocket } from '../hooks/useSocket';
 import { fetchTrips, stopTrip } from '../api/trips';
@@ -11,6 +12,7 @@ import { fetchAlerts, acknowledgeAlert } from '../api/alerts';
 const Dashboard = () => {
   const [activeTrips, setActiveTrips] = useState([]);
   const [showStartForm, setShowStartForm] = useState(false);
+  const [showCallForm, setShowCallForm] = useState(false);
   const [ambulancePositions, setAmbulancePositions] = useState({});
   const [signals, setSignals] = useState([]);
   const [activeRoutes, setActiveRoutes] = useState([]);
@@ -25,7 +27,6 @@ const Dashboard = () => {
     }
   }, []);
 
-  // Load signals & alerts initially
   useEffect(() => {
     const loadInitialData = async () => {
       try {
@@ -49,7 +50,6 @@ const Dashboard = () => {
     refreshTrips();
   }, [refreshTrips]);
 
-  // Sync routes when trips change
   useEffect(() => {
     const loadActiveRoutes = async () => {
       const routes = [];
@@ -105,7 +105,6 @@ const Dashboard = () => {
           vehicleNumber: data.vehicleNumber
         }
       }));
-      // Update trip ETA and progress in the trip list
       setActiveTrips(prev => prev.map(trip => {
         if (trip.id === data.tripId) {
           return {
@@ -134,18 +133,34 @@ const Dashboard = () => {
         delete newPos[data.tripId];
         return newPos;
       });
-    }, [])
+    }, []),
+    'trip:updated': useCallback(() => {
+      refreshTrips();
+    }, [refreshTrips]),
+    'trip:phase': useCallback(() => {
+      refreshTrips();
+    }, [refreshTrips])
   };
 
   useSocket(socketHandlers);
 
   return (
     <div className="flex w-full h-[calc(100vh-64px)]">
-      <TripList
-        trips={activeTrips}
-        onStopTrip={handleStopTrip}
-        onStartClick={() => setShowStartForm(true)}
-      />
+      <div className="flex flex-col">
+        <div className="p-2 border-b border-gray-200 bg-white">
+          <button
+            onClick={() => setShowCallForm(true)}
+            className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow transition-colors text-sm"
+          >
+            🚨 Emergency Dispatch
+          </button>
+        </div>
+        <TripList
+          trips={activeTrips}
+          onStopTrip={handleStopTrip}
+          onStartClick={() => setShowStartForm(true)}
+        />
+      </div>
       <MapView
         ambulancePositions={ambulancePositions}
         signals={signals}
@@ -158,6 +173,16 @@ const Dashboard = () => {
           onClose={() => setShowStartForm(false)}
           onSuccess={() => {
             setShowStartForm(false);
+            refreshTrips();
+          }}
+        />
+      )}
+
+      {showCallForm && (
+        <CallAmbulanceForm
+          onClose={() => setShowCallForm(false)}
+          onSuccess={() => {
+            setShowCallForm(false);
             refreshTrips();
           }}
         />

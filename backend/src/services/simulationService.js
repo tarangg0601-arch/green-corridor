@@ -7,6 +7,8 @@ const tripModel = require('../models/trip');
 const ambulanceModel = require('../models/ambulance');
 const signalService = require('./signalService');
 const logger = require('../utils/logger');
+const routingService = require('./routingService');
+const { run, queryOne } = require('../db/helpers');
 
 const activeSimulations = new Map();
 
@@ -73,7 +75,7 @@ function tick(sim) {
   }
 }
 
-function completeTrip(tripId) {
+async function completeTrip(tripId) {
   const sim = activeSimulations.get(tripId);
   if (!sim) return;
 
@@ -81,16 +83,73 @@ function completeTrip(tripId) {
   activeSimulations.delete(tripId);
 
   const db = getDB();
-  tripModel.updateStatus(db, tripId, 'completed', new Date().toISOString());
-  ambulanceModel.updateStatus(db, sim.ambulanceId, 'arrived');
-  signalService.resetRouteSignals(sim.routeId);
-  saveDB();
+  const trip = tripModel.getById(db, tripId);
+  
+  if (trip && trip.phase === 'to_pickup') {
+    logger.info(`Trip ${tripId} arrived at pickup. Transitioning to hospital route in 15s.`);
+    tripModel.updatePhase(db, tripId, 'at_pickup');
+    saveDB();
+    const io = getIO();
+    if (io) {
+      io.emit('trip:updated', tripModel.getById(db, tripId));
+    }
 
-  logger.info(`Trip ${tripId} completed.`);
+    setTimeout(async () => {
+      try {
+        const destHospital = queryOne(db, 'SELECT * FROM hospitals WHERE id = ?', [trip.dest_hospital_id]);
+        if (!destHospital) throw new Error('No destination hospital found');
+        
+        const routeData = await routingService.getRoute(trip.pickup_lat, trip.pickup_lng, destHospital.lat, destHospital.lng);
+        const virtualSignals = routingService.generateVirtualSignals(routeData.polyline);
 
-  const io = getIO();
-  if (io) {
-    io.emit('trip:ended', { tripId });
+        const routeName = `Pickup to ${destHospital.name}`;
+        const info = run(db,
+          'INSERT INTO routes (name, start_name, end_name, polyline, is_custom) VALUES (?, ?, ?, ?, 1)',
+          [routeName, 'Emergency Location', destHospital.name, JSON.stringify(routeData.polyline)]
+        );
+        const newRouteId = info.lastInsertRowid;
+
+        for (const sig of virtualSignals) {
+          run(db,
+            'INSERT INTO signals (route_id, name, lat, lng, order_in_route) VALUES (?, ?, ?, ?, ?)',
+            [newRouteId, sig.name, sig.lat, sig.lng, sig.order_in_route]
+          );
+        }
+
+        tripModel.updateRoute(db, tripId, newRouteId);
+        tripModel.updatePhase(db, tripId, 'to_hospital');
+        saveDB();
+
+        const updatedTrip = tripModel.getById(db, tripId);
+        if (io) {
+          io.emit('trip:updated', updatedTrip);
+        }
+
+        startSimulation({
+          tripId: updatedTrip.id,
+          ambulanceId: updatedTrip.ambulance_id,
+          routeId: newRouteId,
+          polyline: routeData.polyline,
+          signals: virtualSignals,
+          vehicleNumber: updatedTrip.vehicle_number
+        });
+      } catch (err) {
+        logger.error(`Failed to route to hospital: ${err.message}`);
+      }
+    }, 15000);
+
+  } else {
+    tripModel.updateStatus(db, tripId, 'completed', new Date().toISOString());
+    ambulanceModel.updateStatus(db, sim.ambulanceId, 'arrived');
+    signalService.resetRouteSignals(sim.routeId);
+    saveDB();
+
+    logger.info(`Trip ${tripId} completed.`);
+
+    const io = getIO();
+    if (io) {
+      io.emit('trip:ended', { tripId });
+    }
   }
 }
 

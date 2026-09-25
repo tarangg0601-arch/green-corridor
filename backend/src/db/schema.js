@@ -3,6 +3,13 @@ const logger = require('../utils/logger');
 function initializeSchema(db) {
   logger.info('Initializing database schema...');
   
+  db.run(`CREATE TABLE IF NOT EXISTS hospitals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    lat REAL NOT NULL,
+    lng REAL NOT NULL
+  )`);
+
   db.run(`CREATE TABLE IF NOT EXISTS ambulances (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     vehicle_number TEXT UNIQUE NOT NULL,
@@ -41,6 +48,10 @@ function initializeSchema(db) {
     ambulance_id INTEGER NOT NULL REFERENCES ambulances(id),
     route_id INTEGER NOT NULL REFERENCES routes(id),
     status TEXT DEFAULT 'active' CHECK(status IN ('active', 'completed', 'cancelled')),
+    phase TEXT DEFAULT NULL,
+    pickup_lat REAL DEFAULT NULL,
+    pickup_lng REAL DEFAULT NULL,
+    dest_hospital_id INTEGER DEFAULT NULL,
     start_time TEXT NOT NULL,
     end_time TEXT
   )`);

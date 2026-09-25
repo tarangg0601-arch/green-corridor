@@ -15,6 +15,7 @@ const ambulanceRoutes = require('./routes/ambulanceRoutes');
 const routeRoutes = require('./routes/routeRoutes');
 const tripRoutes = require('./routes/tripRoutes');
 const alertRoutes = require('./routes/alertRoutes');
+const dispatchRoutes = require('./routes/dispatchRoutes');
 
 async function main() {
   // Initialize database
@@ -32,6 +33,7 @@ async function main() {
   app.use('/api/routes', routeRoutes);
   app.use('/api/trips', tripRoutes);
   app.use('/api/alerts', alertRoutes);
+  app.use('/api/dispatch', dispatchRoutes);
 
   const server = http.createServer(app);
   const io = new Server(server, {

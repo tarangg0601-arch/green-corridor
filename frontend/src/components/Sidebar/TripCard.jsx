@@ -4,6 +4,12 @@ const TripCard = ({ trip, onStopTrip }) => {
   const progress = trip.progress || 0;
   const nextSignal = trip.next_signal;
 
+  const phaseLabel = {
+    to_pickup: '🚗 En route to pickup',
+    at_pickup: '📍 At pickup location',
+    to_hospital: '🏥 En route to hospital'
+  };
+
   return (
     <div className="bg-white p-3 rounded-lg shadow border-l-4 border-gc-green hover:shadow-md transition-shadow">
       <div className="flex justify-between items-start mb-2">
@@ -25,6 +31,18 @@ const TripCard = ({ trip, onStopTrip }) => {
           ETA: <span className="font-semibold text-gc-blue">{eta ? `${eta}s` : 'Calculating...'}</span>
         </div>
       </div>
+
+      {trip.phase && (
+        <div className="text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-full w-max mb-2 uppercase tracking-wide">
+          {phaseLabel[trip.phase] || trip.phase.replace('_', ' ')}
+        </div>
+      )}
+
+      {trip.dest_hospital_name && (
+        <p className="text-xs text-gray-500 mb-2">
+          <span className="font-semibold">Dest:</span> {trip.dest_hospital_name}
+        </p>
+      )}
 
       <div className="w-full bg-gray-200 rounded-full h-1.5 mb-3">
         <div

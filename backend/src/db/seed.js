@@ -2,6 +2,16 @@ const logger = require('../utils/logger');
 const { queryOne, run } = require('./helpers');
 
 function seedDatabase(db) {
+  const hospCount = queryOne(db, 'SELECT COUNT(*) as c FROM hospitals');
+  if (hospCount && hospCount.c === 0) {
+    logger.info('Seeding hospitals...');
+    run(db, 'INSERT INTO hospitals (name, lat, lng) VALUES (?, ?, ?)', ['Apollo Hospital', 13.0604, 80.2496]);
+    run(db, 'INSERT INTO hospitals (name, lat, lng) VALUES (?, ?, ?)', ['MIOT Hospital', 13.0320, 80.2080]);
+    run(db, 'INSERT INTO hospitals (name, lat, lng) VALUES (?, ?, ?)', ['Rajiv Gandhi Government Hospital', 13.0510, 80.2750]);
+    run(db, 'INSERT INTO hospitals (name, lat, lng) VALUES (?, ?, ?)', ['Kaveri Hospital', 13.0335, 80.2589]);
+    run(db, 'INSERT INTO hospitals (name, lat, lng) VALUES (?, ?, ?)', ['Fortis Malar Hospital', 13.0116, 80.2568]);
+  }
+
   const count = queryOne(db, 'SELECT COUNT(*) as c FROM ambulances');
   if (count && count.c > 0) {
     logger.info('Database already seeded. Skipping seed.');
