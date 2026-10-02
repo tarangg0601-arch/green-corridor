@@ -62,9 +62,21 @@ exports.callAmbulance = async (req, res) => {
 
     if (!nearestAmb) return res.status(500).json({ error: 'Could not determine ambulance location' });
 
-    // 3. Leg 1: Route from ambulance base to pickup
-    const routeData = await routingService.getRoute(ambBaseLat, ambBaseLng, pickup.lat, pickup.lng);
-    const virtualSignals = routingService.generateVirtualSignals(routeData.polyline);
+    // Mark as en_route immediately to prevent concurrent dispatch race conditions
+    ambulanceModel.updateStatus(db, nearestAmb.id, 'en_route');
+    saveDB();
+
+    let routeData;
+    let virtualSignals;
+    try {
+      // 3. Leg 1: Route from ambulance base to pickup
+      routeData = await routingService.getRoute(ambBaseLat, ambBaseLng, pickup.lat, pickup.lng);
+      virtualSignals = routingService.generateVirtualSignals(routeData.polyline);
+    } catch (routeErr) {
+      ambulanceModel.updateStatus(db, nearestAmb.id, 'idle');
+      saveDB();
+      throw new Error('Routing failed: ' + routeErr.message);
+    }
 
     const routeName = `Dispatch to ${pickup.displayName.split(',')[0]}`;
     const info = run(db,

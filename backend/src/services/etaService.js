@@ -11,7 +11,7 @@ const logger = require('../utils/logger');
  * priority mode when the ambulance is within the configured threshold.
  * Returns info about the next upcoming signal for the position broadcast.
  */
-function processSignals(sim) {
+function processSignals(sim, checkSignalNeededFn) {
   const db = getDB();
   let nextSignal = null;
 
@@ -22,7 +22,9 @@ function processSignals(sim) {
     if (distanceToSignal < -0.05) {
       // Ambulance has passed this signal (with 50m tolerance)
       if (signal.isGreenForTrip) {
-        signalService.revertSignal(signal.id);
+        if (!checkSignalNeededFn || !checkSignalNeededFn(signal.id)) {
+          signalService.revertSignal(signal.id);
+        }
         signal.isGreenForTrip = false;
       }
       continue;

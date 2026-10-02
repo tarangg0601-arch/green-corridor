@@ -76,16 +76,13 @@ exports.stop = (req, res) => {
 
     tripModel.updateStatus(db, trip.id, 'cancelled', new Date().toISOString());
     ambulanceModel.updateStatus(db, trip.ambulance_id, 'idle');
-    signalModel.resetRouteSignals(db, trip.route_id);
     saveDB();
 
     simulationService.stopSimulation(trip.id);
 
-    // Broadcast signal resets
+    // Broadcast trip ended
     const io = getIO();
     if (io) {
-      const signals = signalModel.getByRouteId(db, trip.route_id);
-      signals.forEach(s => io.emit('signal:stateChange', { signalId: s.id, state: 'red' }));
       io.emit('trip:ended', { tripId: trip.id });
     }
 

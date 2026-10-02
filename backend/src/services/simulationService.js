@@ -45,6 +45,15 @@ function startSimulation(tripData) {
   activeSimulations.set(tripId, sim);
 }
 
+function isSignalNeededByAnotherTrip(signalId, excludeTripId) {
+  for (const [tripId, otherSim] of activeSimulations.entries()) {
+    if (tripId === excludeTripId) continue;
+    const sig = otherSim.signals.find(s => s.id === signalId);
+    if (sig && sig.isGreenForTrip) return true;
+  }
+  return false;
+}
+
 function tick(sim) {
   // Distance covered in one tick: speed (km/h) converted to km per tick interval
   const distanceIncrement = (config.ambulanceSpeedKmh / 3600) * (config.simulationTickMs / 1000);
@@ -56,7 +65,7 @@ function tick(sim) {
   }
 
   const position = geo.interpolatePosition(sim.polyline, sim.distanceTraveled);
-  const nextSignal = etaService.processSignals(sim);
+  const nextSignal = etaService.processSignals(sim, (sigId) => isSignalNeededByAnotherTrip(sigId, sim.tripId));
 
   const io = getIO();
   if (io) {
@@ -80,7 +89,6 @@ async function completeTrip(tripId) {
   if (!sim) return;
 
   clearInterval(sim.intervalId);
-  activeSimulations.delete(tripId);
 
   const db = getDB();
   const trip = tripModel.getById(db, tripId);
@@ -140,9 +148,18 @@ async function completeTrip(tripId) {
     }, 15000);
 
   } else {
+    activeSimulations.delete(tripId);
     tripModel.updateStatus(db, tripId, 'completed', new Date().toISOString());
     ambulanceModel.updateStatus(db, sim.ambulanceId, 'idle');
-    signalService.resetRouteSignals(sim.routeId);
+    
+    for (const signal of sim.signals) {
+      if (signal.isGreenForTrip) {
+        if (!isSignalNeededByAnotherTrip(signal.id, tripId)) {
+          signalService.revertSignal(signal.id);
+        }
+        signal.isGreenForTrip = false;
+      }
+    }
     saveDB();
 
     logger.info(`Trip ${tripId} completed.`);
@@ -159,6 +176,16 @@ function stopSimulation(tripId) {
   if (sim) {
     if (sim.intervalId) clearInterval(sim.intervalId);
     if (sim.timeoutId) clearTimeout(sim.timeoutId);
+    
+    for (const signal of sim.signals) {
+      if (signal.isGreenForTrip) {
+        if (!isSignalNeededByAnotherTrip(signal.id, tripId)) {
+          signalService.revertSignal(signal.id);
+        }
+        signal.isGreenForTrip = false;
+      }
+    }
+
     activeSimulations.delete(tripId);
     logger.info(`Simulation stopped for trip ${tripId}`);
   }
