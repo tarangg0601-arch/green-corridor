@@ -25,8 +25,9 @@ async function initDB() {
     logger.info(`New database created at ${dbFilePath}`);
   }
 
-  // Enable WAL mode for better concurrency
+  // Enable WAL mode for better concurrency and Foreign Keys
   db.run('PRAGMA journal_mode = WAL');
+  db.run('PRAGMA foreign_keys = ON');
   
   return db;
 }

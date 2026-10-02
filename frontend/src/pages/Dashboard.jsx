@@ -53,15 +53,31 @@ const Dashboard = () => {
   useEffect(() => {
     const loadActiveRoutes = async () => {
       const routes = [];
+      let hasNewSignals = false;
+      const newSignalsMap = new Map();
+      
       for (const trip of activeTrips) {
         if (trip.route_id) {
           try {
             const rData = await fetchRoute(trip.route_id);
             routes.push({ ...rData, positions: rData.polyline });
+            if (rData.signals) {
+              hasNewSignals = true;
+              rData.signals.forEach(s => newSignalsMap.set(s.id, s));
+            }
           } catch (e) {}
         }
       }
       setActiveRoutes(routes);
+      
+      if (hasNewSignals) {
+        setSignals(prev => {
+          const map = new Map();
+          prev.forEach(s => map.set(s.id, s));
+          newSignalsMap.forEach((v, k) => map.set(k, v));
+          return Array.from(map.values());
+        });
+      }
     };
     if (activeTrips.length > 0) {
       loadActiveRoutes();

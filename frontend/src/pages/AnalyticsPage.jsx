@@ -13,18 +13,6 @@ const AnalyticsPage = () => {
         setData(stats);
       } catch (err) {
         console.error('Failed to load analytics', err);
-        // Fallback mock data if API is incomplete
-        setData({
-          total_trips: 42,
-          total_signals_prioritized: 156,
-          chart_data: [
-            { trip: 'Trip 1', signals: 4 },
-            { trip: 'Trip 2', signals: 6 },
-            { trip: 'Trip 3', signals: 3 },
-            { trip: 'Trip 4', signals: 7 },
-            { trip: 'Trip 5', signals: 5 }
-          ]
-        });
       } finally {
         setLoading(false);
       }

@@ -27,7 +27,7 @@ module.exports = {
   getStats: (db) => queryOne(db, `
     SELECT
       (SELECT COUNT(*) FROM priority_events) as total_events,
-      (SELECT COUNT(DISTINCT trip_id) FROM priority_events) as total_trips,
+      (SELECT COUNT(*) FROM trips) as total_trips,
       (SELECT COUNT(*) FROM priority_events WHERE acknowledged = 1) as total_acknowledged
   `)
 };

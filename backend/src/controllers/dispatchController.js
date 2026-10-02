@@ -74,10 +74,11 @@ exports.callAmbulance = async (req, res) => {
     const routeId = info.lastInsertRowid;
 
     for (const sig of virtualSignals) {
-      run(db,
+      const sigInfo = run(db,
         'INSERT INTO signals (route_id, name, lat, lng, order_in_route) VALUES (?, ?, ?, ?, ?)',
         [routeId, sig.name, sig.lat, sig.lng, sig.order_in_route]
       );
+      sig.id = sigInfo.lastInsertRowid;
     }
 
     // 4. Create Trip with Phase 'to_pickup'

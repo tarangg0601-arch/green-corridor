@@ -94,7 +94,7 @@ async function completeTrip(tripId) {
       io.emit('trip:updated', tripModel.getById(db, tripId));
     }
 
-    setTimeout(async () => {
+    sim.timeoutId = setTimeout(async () => {
       try {
         const destHospital = queryOne(db, 'SELECT * FROM hospitals WHERE id = ?', [trip.dest_hospital_id]);
         if (!destHospital) throw new Error('No destination hospital found');
@@ -110,10 +110,11 @@ async function completeTrip(tripId) {
         const newRouteId = info.lastInsertRowid;
 
         for (const sig of virtualSignals) {
-          run(db,
+          const sigInfo = run(db,
             'INSERT INTO signals (route_id, name, lat, lng, order_in_route) VALUES (?, ?, ?, ?, ?)',
             [newRouteId, sig.name, sig.lat, sig.lng, sig.order_in_route]
           );
+          sig.id = sigInfo.lastInsertRowid;
         }
 
         tripModel.updateRoute(db, tripId, newRouteId);
@@ -140,7 +141,7 @@ async function completeTrip(tripId) {
 
   } else {
     tripModel.updateStatus(db, tripId, 'completed', new Date().toISOString());
-    ambulanceModel.updateStatus(db, sim.ambulanceId, 'arrived');
+    ambulanceModel.updateStatus(db, sim.ambulanceId, 'idle');
     signalService.resetRouteSignals(sim.routeId);
     saveDB();
 
@@ -156,7 +157,8 @@ async function completeTrip(tripId) {
 function stopSimulation(tripId) {
   const sim = activeSimulations.get(tripId);
   if (sim) {
-    clearInterval(sim.intervalId);
+    if (sim.intervalId) clearInterval(sim.intervalId);
+    if (sim.timeoutId) clearTimeout(sim.timeoutId);
     activeSimulations.delete(tripId);
     logger.info(`Simulation stopped for trip ${tripId}`);
   }

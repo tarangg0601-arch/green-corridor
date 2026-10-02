@@ -1,23 +1,8 @@
 import { useState, useEffect } from 'react';
 import { fetchAmbulances } from '../../api/ambulances';
 
-const AmbulanceList = ({ refreshTrigger }) => {
-  const [ambulances, setAmbulances] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const loadAmbulances = async () => {
-      try {
-        const data = await fetchAmbulances();
-        setAmbulances(data);
-      } catch (err) {
-        console.error('Failed to load ambulances', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadAmbulances();
-  }, [refreshTrigger]);
+const AmbulanceList = ({ ambulances }) => {
+  if (!ambulances) return <div className="p-4">Loading ambulances...</div>;
 
   const getStatusBadge = (status) => {
     const styles = {
@@ -32,7 +17,7 @@ const AmbulanceList = ({ refreshTrigger }) => {
     );
   };
 
-  if (loading) return <div className="p-4">Loading ambulances...</div>;
+
 
   return (
     <div className="bg-white rounded-lg shadow overflow-hidden">
