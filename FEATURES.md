@@ -85,6 +85,9 @@
   - **Leg 2**: Routes the ambulance from the pickup location to the destination hospital.
 - Auto-generates virtual traffic signals for both legs.
 - UI displays current trip phases (e.g., "En route to pickup", "At pickup location", "En route to hospital") and the destination hospital name.
+- Robust failure and cancellation handling across all trip phases (`to_pickup`, `at_pickup`, `to_hospital`) with automatic resource cleanup, signal restoration, and ambulance release.
+- Server startup recovery: automatically detects and recovers interrupted active trips from prior server sessions, releasing affected ambulances and resetting signals to red.
+- Safe schema migration: dynamically inspects and adds missing columns (`is_custom`, `phase`, `pickup_lat`, `pickup_lng`, `dest_hospital_id`) on legacy databases using `PRAGMA table_info`.
 
 ---
 

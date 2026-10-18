@@ -9,19 +9,38 @@ const geo = require('../utils/geo');
 const { getIO } = require('../socketManager');
 const logger = require('../utils/logger');
 
+function parseCoordinate(val, min, max) {
+  if (val === undefined || val === null || val === '') return null;
+  const num = typeof val === 'number' ? val : Number(val);
+  if (!Number.isFinite(num)) return null;
+  if (num < min || num > max) return null;
+  return num;
+}
+
 exports.callAmbulance = async (req, res) => {
   try {
     const db = getDB();
     const { address, lat, lng } = req.body;
 
-    let pickup = { lat, lng, displayName: 'Emergency Location' };
-    if (address && (!lat || !lng)) {
-      pickup = await geocodingService.geocode(address);
+    const parsedLat = parseCoordinate(lat, -90, 90);
+    const parsedLng = parseCoordinate(lng, -180, 180);
+
+    let pickup = null;
+    if (parsedLat !== null && parsedLng !== null) {
+      pickup = { lat: parsedLat, lng: parsedLng, displayName: 'Emergency Location' };
+    } else if (address && typeof address === 'string' && address.trim().length > 0) {
+      pickup = await geocodingService.geocode(address.trim());
+    } else {
+      return res.status(400).json({ error: 'Pickup address or valid coordinates (lat, lng) required' });
     }
 
-    if (!pickup.lat || !pickup.lng) {
+    const validPickupLat = parseCoordinate(pickup.lat, -90, 90);
+    const validPickupLng = parseCoordinate(pickup.lng, -180, 180);
+    if (validPickupLat === null || validPickupLng === null) {
       return res.status(400).json({ error: 'Could not resolve pickup location' });
     }
+    pickup.lat = validPickupLat;
+    pickup.lng = validPickupLng;
 
     // 1. Find nearest hospital to the pickup location
     const hospitals = queryAll(db, 'SELECT * FROM hospitals');

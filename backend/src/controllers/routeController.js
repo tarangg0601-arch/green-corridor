@@ -26,25 +26,54 @@ exports.getById = (req, res) => {
   }
 };
 
+function parseCoordinate(val, min, max) {
+  if (val === undefined || val === null || val === '') return null;
+  const num = typeof val === 'number' ? val : Number(val);
+  if (!Number.isFinite(num)) return null;
+  if (num < min || num > max) return null;
+  return num;
+}
+
 exports.createCustom = async (req, res) => {
   try {
     const db = getDB();
     const { startAddress, endAddress, startLat, startLng, endLat, endLng, name } = req.body;
 
-    let start = { lat: startLat, lng: startLng, displayName: 'Start' };
-    let end = { lat: endLat, lng: endLng, displayName: 'End' };
+    const parsedStartLat = parseCoordinate(startLat, -90, 90);
+    const parsedStartLng = parseCoordinate(startLng, -180, 180);
+    const parsedEndLat = parseCoordinate(endLat, -90, 90);
+    const parsedEndLng = parseCoordinate(endLng, -180, 180);
 
-    // Geocode addresses if coordinates aren't provided directly
-    if (startAddress && (!startLat || !startLng)) {
-      start = await geocodingService.geocode(startAddress);
-    }
-    if (endAddress && (!endLat || !endLng)) {
-      end = await geocodingService.geocode(endAddress);
+    let start = null;
+    if (parsedStartLat !== null && parsedStartLng !== null) {
+      start = { lat: parsedStartLat, lng: parsedStartLng, displayName: 'Start' };
+    } else if (startAddress && typeof startAddress === 'string' && startAddress.trim().length > 0) {
+      start = await geocodingService.geocode(startAddress.trim());
+    } else {
+      return res.status(400).json({ error: 'Start address or valid start coordinates (startLat, startLng) required' });
     }
 
-    if (!start.lat || !start.lng || !end.lat || !end.lng) {
+    let end = null;
+    if (parsedEndLat !== null && parsedEndLng !== null) {
+      end = { lat: parsedEndLat, lng: parsedEndLng, displayName: 'End' };
+    } else if (endAddress && typeof endAddress === 'string' && endAddress.trim().length > 0) {
+      end = await geocodingService.geocode(endAddress.trim());
+    } else {
+      return res.status(400).json({ error: 'End address or valid end coordinates (endLat, endLng) required' });
+    }
+
+    const validStartLat = parseCoordinate(start.lat, -90, 90);
+    const validStartLng = parseCoordinate(start.lng, -180, 180);
+    const validEndLat = parseCoordinate(end.lat, -90, 90);
+    const validEndLng = parseCoordinate(end.lng, -180, 180);
+
+    if (validStartLat === null || validStartLng === null || validEndLat === null || validEndLng === null) {
       return res.status(400).json({ error: 'Could not resolve start and end locations' });
     }
+    start.lat = validStartLat;
+    start.lng = validStartLng;
+    end.lat = validEndLat;
+    end.lng = validEndLng;
 
     // Get driving route from OSRM
     const routeData = await routingService.getRoute(start.lat, start.lng, end.lat, end.lng);

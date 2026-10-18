@@ -1,4 +1,14 @@
 const logger = require('../utils/logger');
+const { queryAll } = require('./helpers');
+
+function ensureColumn(db, table, column, definition) {
+  const columns = queryAll(db, `PRAGMA table_info(${table})`);
+  const exists = columns.some(col => col.name === column);
+  if (!exists) {
+    logger.info(`Migrating schema: adding column ${column} to table ${table}`);
+    db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
 
 function initializeSchema(db) {
   logger.info('Initializing database schema...');
@@ -64,6 +74,13 @@ function initializeSchema(db) {
     eta_at_trigger REAL NOT NULL,
     acknowledged INTEGER DEFAULT 0
   )`);
+
+  // Safe migrations for legacy databases
+  ensureColumn(db, 'routes', 'is_custom', 'INTEGER DEFAULT 0');
+  ensureColumn(db, 'trips', 'phase', 'TEXT DEFAULT NULL');
+  ensureColumn(db, 'trips', 'pickup_lat', 'REAL DEFAULT NULL');
+  ensureColumn(db, 'trips', 'pickup_lng', 'REAL DEFAULT NULL');
+  ensureColumn(db, 'trips', 'dest_hospital_id', 'INTEGER DEFAULT NULL');
 
   logger.info('Schema initialized.');
 }

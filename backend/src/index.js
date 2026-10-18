@@ -16,12 +16,14 @@ const routeRoutes = require('./routes/routeRoutes');
 const tripRoutes = require('./routes/tripRoutes');
 const alertRoutes = require('./routes/alertRoutes');
 const dispatchRoutes = require('./routes/dispatchRoutes');
+const simulationService = require('./services/simulationService');
 
 async function main() {
   // Initialize database
   const db = await initDB();
   initializeSchema(db);
   seedDatabase(db);
+  simulationService.recoverInterruptedTrips(db);
   saveDB();
 
   const app = express();

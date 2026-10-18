@@ -14,6 +14,10 @@ build/
 *.db
 *.sqlite
 *.sqlite3
+*.bak
+
+# Nested unzipped archives
+green-corridor/
 
 # IDE / Editor
 .vscode/

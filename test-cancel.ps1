@@ -16,3 +16,15 @@ Start-Sleep -Seconds 18
 
 $tripStatus = Invoke-RestMethod -Uri "http://localhost:3001/api/trips/$tripId"
 Write-Output "Final trip status: $($tripStatus.status)"
+
+$ambStatus = Invoke-RestMethod -Uri "http://localhost:3001/api/ambulances"
+$assignedAmb = $ambStatus | Where-Object { $_.id -eq $tripStatus.ambulance_id }
+Write-Output "Assigned Ambulance $($assignedAmb.id) status: $($assignedAmb.status)"
+
+if ($tripStatus.status -eq 'cancelled' -and $assignedAmb.status -eq 'idle') {
+    Write-Output "PASS: Trip successfully cancelled and ambulance released to idle."
+    exit 0
+} else {
+    Write-Error "FAIL: Expected trip cancelled and ambulance idle, got trip '$($tripStatus.status)' and ambulance '$($assignedAmb.status)'"
+    exit 1
+}

@@ -22,7 +22,7 @@ A full-stack web application that simulates smart traffic management for emergen
 
 - **Frontend**: React (Vite) + Tailwind CSS + Leaflet.js with OpenStreetMap tiles
 - **Backend**: Node.js + Express + Socket.io
-- **Database**: SQLite via better-sqlite3
+- **Database**: SQLite via `sql.js` (WebAssembly SQLite with file persistence to disk)
 - **Maps**: Leaflet.js with OpenStreetMap (no API key required)
 
 ## Prerequisites
@@ -98,16 +98,24 @@ green-corridor/
 
 ## Configuration
 
-All tunable parameters live in `backend/.env` (see `.env.example`):
+All tunable backend parameters live in `backend/.env` (see `.env.example`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | 3001 | Backend server port |
+| `DB_PATH` | `./data/green_corridor.db` | SQLite database file location |
 | `SIMULATION_TICK_MS` | 2000 | Position update interval (ms) |
 | `AMBULANCE_SPEED_KMH` | 45 | Simulated ambulance speed |
 | `PRIORITY_THRESHOLD_SECONDS` | 30 | How far ahead to trigger green signal |
 | `SIGNAL_GREEN_DURATION_S` | 30 | Normal green phase duration |
 | `SIGNAL_RED_DURATION_S` | 45 | Normal red phase duration |
+
+Frontend environment variables can be set in `frontend/.env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_API_URL` | `http://localhost:3001/api` | Backend REST API base URL |
+| `VITE_WS_URL` | `http://localhost:3001` | Backend Socket.IO WebSocket URL |
 
 ## API Overview
 
@@ -117,11 +125,13 @@ All tunable parameters live in `backend/.env` (see `.env.example`):
 | POST | `/api/ambulances` | Register an ambulance |
 | GET | `/api/routes` | List all routes |
 | GET | `/api/routes/:id` | Route details with signals |
+| POST | `/api/routes/custom` | Create on-the-fly custom A → B route via OSRM |
 | GET | `/api/trips` | List trips (filterable by status) |
-| POST | `/api/trips/start` | Start a new trip |
+| POST | `/api/trips/start` | Start a new predefined or custom trip |
 | POST | `/api/trips/:id/stop` | Stop/cancel a trip |
-| GET | `/api/alerts` | Recent alerts |
-| PATCH | `/api/alerts/:id/acknowledge` | Acknowledge an alert |
+| POST | `/api/dispatch/call` | Emergency two-leg dispatch (nearest ambulance → pickup → hospital) |
+| GET | `/api/alerts` | Recent police alerts |
+| PATCH | `/api/alerts/:id/acknowledge` | Acknowledge a police alert |
 | GET | `/api/analytics/summary` | Aggregate statistics |
 
 ## WebSocket Events
@@ -132,7 +142,19 @@ All tunable parameters live in `backend/.env` (see `.env.example`):
 | `signal:stateChange` | Server → Client | Signal turned green/red |
 | `alert:new` | Server → Client | New police alert generated |
 | `trip:started` | Server → Client | Trip simulation began |
-| `trip:ended` | Server → Client | Trip completed or cancelled |
+| `trip:updated` | Server → Client | Trip phase or route updated |
+| `trip:ended` | Server → Client | Trip completed, cancelled, or failed |
+
+## Routing, Geocoding & Attribution
+
+- **Geocoding**: Uses the free Nominatim OpenStreetMap API with a client-side request throttle (1.1s minimum interval) and in-memory caching.
+- **Routing**: Uses the public OSRM (Open Source Routing Machine) driving API to compute real street geometry and driving polylines.
+- **Attribution**: Map data © OpenStreetMap contributors, routing powered by OSRM.
+
+## Database Migrations & Startup Recovery
+
+- **Safe Column Migrations**: `initializeSchema` uses `PRAGMA table_info` to detect legacy databases and safely add missing columns (`is_custom`, `phase`, `pickup_lat`, `pickup_lng`, `dest_hospital_id`) via `ALTER TABLE`.
+- **Interrupted Trip Recovery**: On server restart, any active trips interrupted by server shutdown are recovered by marking them `cancelled` with an `end_time`, releasing their ambulances back to `idle`, and resetting all signals back to `red`.
 
 ## Sample Data
 

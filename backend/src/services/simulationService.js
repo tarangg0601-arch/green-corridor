@@ -8,7 +8,7 @@ const ambulanceModel = require('../models/ambulance');
 const signalService = require('./signalService');
 const logger = require('../utils/logger');
 const routingService = require('./routingService');
-const { run, queryOne } = require('../db/helpers');
+const { run, queryOne, queryAll } = require('../db/helpers');
 
 const activeSimulations = new Map();
 
@@ -88,7 +88,10 @@ async function completeTrip(tripId) {
   const sim = activeSimulations.get(tripId);
   if (!sim) return;
 
-  clearInterval(sim.intervalId);
+  if (sim.intervalId) {
+    clearInterval(sim.intervalId);
+    sim.intervalId = null;
+  }
 
   const db = getDB();
   const trip = tripModel.getById(db, tripId);
@@ -96,18 +99,38 @@ async function completeTrip(tripId) {
   if (trip && trip.phase === 'to_pickup') {
     logger.info(`Trip ${tripId} arrived at pickup. Transitioning to hospital route in 15s.`);
     tripModel.updatePhase(db, tripId, 'at_pickup');
+
+    // Revert any green signals on Leg 1 now that ambulance arrived at pickup
+    for (const signal of sim.signals) {
+      if (signal.isGreenForTrip) {
+        if (!isSignalNeededByAnotherTrip(signal.id, tripId)) {
+          signalService.revertSignal(signal.id);
+        }
+        signal.isGreenForTrip = false;
+      }
+    }
     saveDB();
+
     const io = getIO();
     if (io) {
       io.emit('trip:updated', tripModel.getById(db, tripId));
     }
 
     sim.timeoutId = setTimeout(async () => {
+      sim.timeoutId = null;
       try {
-        const destHospital = queryOne(db, 'SELECT * FROM hospitals WHERE id = ?', [trip.dest_hospital_id]);
+        // Verify trip is still active and waiting at pickup
+        const currentTrip = tripModel.getById(db, tripId);
+        if (!currentTrip || currentTrip.status !== 'active' || currentTrip.phase !== 'at_pickup') {
+          logger.info(`Trip ${tripId} is no longer active at pickup (status: ${currentTrip ? currentTrip.status : 'null'}). Aborting second leg.`);
+          activeSimulations.delete(tripId);
+          return;
+        }
+
+        const destHospital = queryOne(db, 'SELECT * FROM hospitals WHERE id = ?', [currentTrip.dest_hospital_id]);
         if (!destHospital) throw new Error('No destination hospital found');
         
-        const routeData = await routingService.getRoute(trip.pickup_lat, trip.pickup_lng, destHospital.lat, destHospital.lng);
+        const routeData = await routingService.getRoute(currentTrip.pickup_lat, currentTrip.pickup_lng, destHospital.lat, destHospital.lng);
         const virtualSignals = routingService.generateVirtualSignals(routeData.polyline);
 
         const routeName = `Pickup to ${destHospital.name}`;
@@ -143,7 +166,34 @@ async function completeTrip(tripId) {
           vehicleNumber: updatedTrip.vehicle_number
         });
       } catch (err) {
-        logger.error(`Failed to route to hospital: ${err.message}`);
+        logger.error(`Failed to route to hospital for trip ${tripId}: ${err.message}`);
+        // Clean up signals for this trip
+        if (sim && sim.signals) {
+          for (const signal of sim.signals) {
+            if (signal.isGreenForTrip) {
+              if (!isSignalNeededByAnotherTrip(signal.id, tripId)) {
+                signalService.revertSignal(signal.id);
+              }
+              signal.isGreenForTrip = false;
+            }
+          }
+        }
+        if (sim) {
+          if (sim.intervalId) clearInterval(sim.intervalId);
+          if (sim.timeoutId) clearTimeout(sim.timeoutId);
+        }
+        activeSimulations.delete(tripId);
+
+        const now = new Date().toISOString();
+        tripModel.updateStatus(db, tripId, 'cancelled', now);
+        ambulanceModel.updateStatus(db, trip.ambulance_id, 'idle');
+        saveDB();
+
+        const io = getIO();
+        if (io) {
+          io.emit('trip:ended', { tripId, reason: 'leg2_routing_failed' });
+          io.emit('trip:updated', tripModel.getById(db, tripId));
+        }
       }
     }, 15000);
 
@@ -174,8 +224,14 @@ async function completeTrip(tripId) {
 function stopSimulation(tripId) {
   const sim = activeSimulations.get(tripId);
   if (sim) {
-    if (sim.intervalId) clearInterval(sim.intervalId);
-    if (sim.timeoutId) clearTimeout(sim.timeoutId);
+    if (sim.intervalId) {
+      clearInterval(sim.intervalId);
+      sim.intervalId = null;
+    }
+    if (sim.timeoutId) {
+      clearTimeout(sim.timeoutId);
+      sim.timeoutId = null;
+    }
     
     for (const signal of sim.signals) {
       if (signal.isGreenForTrip) {
@@ -187,8 +243,29 @@ function stopSimulation(tripId) {
     }
 
     activeSimulations.delete(tripId);
+    saveDB();
     logger.info(`Simulation stopped for trip ${tripId}`);
   }
 }
 
-module.exports = { startSimulation, stopSimulation };
+function recoverInterruptedTrips(db) {
+  const activeTrips = queryAll(db, "SELECT * FROM trips WHERE status = 'active'");
+  if (activeTrips.length > 0) {
+    const now = new Date().toISOString();
+    logger.warn(`Startup recovery: found ${activeTrips.length} interrupted active trip(s). Recovering...`);
+    for (const trip of activeTrips) {
+      tripModel.updateStatus(db, trip.id, 'cancelled', now);
+      ambulanceModel.updateStatus(db, trip.ambulance_id, 'idle');
+      logger.info(`Startup recovery: Trip ${trip.id} marked as cancelled; ambulance ${trip.ambulance_id} released to idle.`);
+    }
+  }
+
+  // Reset any signals that were left in green state back to red
+  const greenSignals = queryAll(db, "SELECT id FROM signals WHERE current_state = 'green'");
+  if (greenSignals.length > 0) {
+    logger.info(`Startup recovery: resetting ${greenSignals.length} green signal(s) back to red.`);
+    run(db, "UPDATE signals SET current_state = 'red' WHERE current_state = 'green'");
+  }
+}
+
+module.exports = { startSimulation, stopSimulation, recoverInterruptedTrips };
