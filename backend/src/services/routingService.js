@@ -13,18 +13,33 @@ async function throttle() {
   lastRequestTime = Date.now();
 }
 
-async function getRoute(startLat, startLng, endLat, endLng) {
+async function getRoute(startLat, startLng, endLat, endLng, options = {}) {
   await throttle();
 
   const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
 
   logger.info(`Fetching OSRM route: (${startLat},${startLng}) -> (${endLat},${endLng})`);
 
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'GreenCorridor-TrafficManagement/1.0 (student-project)'
+  const timeoutSignal = AbortSignal.timeout(8000);
+  const combinedSignal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
+
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        'User-Agent': 'GreenCorridor-TrafficManagement/1.0 (student-project)'
+      },
+      signal: combinedSignal
+    });
+  } catch (err) {
+    if (err.name === 'TimeoutError') {
+      throw new Error('OSRM routing request timed out after 8s');
     }
-  });
+    if (err.name === 'AbortError') {
+      throw new Error('OSRM routing request was aborted');
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     throw new Error(`OSRM API returned status ${response.status}`);

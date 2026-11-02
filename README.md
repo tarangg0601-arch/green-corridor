@@ -132,7 +132,7 @@ Frontend environment variables can be set in `frontend/.env`:
 | POST | `/api/dispatch/call` | Emergency two-leg dispatch (nearest ambulance → pickup → hospital) |
 | GET | `/api/alerts` | Recent police alerts |
 | PATCH | `/api/alerts/:id/acknowledge` | Acknowledge a police alert |
-| GET | `/api/analytics/summary` | Aggregate statistics |
+| GET | `/api/alerts/summary` | Aggregate statistics |
 
 ## WebSocket Events
 

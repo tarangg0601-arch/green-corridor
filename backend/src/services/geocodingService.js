@@ -13,7 +13,7 @@ async function throttle() {
   lastRequestTime = Date.now();
 }
 
-async function geocode(address) {
+async function geocode(address, options = {}) {
   const cacheKey = address.trim().toLowerCase();
   if (cache.has(cacheKey)) {
     logger.info(`Geocoding cache hit for: ${address}`);
@@ -26,11 +26,26 @@ async function geocode(address) {
 
   logger.info(`Geocoding address: ${address}`);
 
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'GreenCorridor-TrafficManagement/1.0 (student-project)'
+  const timeoutSignal = AbortSignal.timeout(8000);
+  const combinedSignal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
+
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        'User-Agent': 'GreenCorridor-TrafficManagement/1.0 (student-project)'
+      },
+      signal: combinedSignal
+    });
+  } catch (err) {
+    if (err.name === 'TimeoutError') {
+      throw new Error('Nominatim geocoding request timed out after 8s');
     }
-  });
+    if (err.name === 'AbortError') {
+      throw new Error('Nominatim geocoding request was aborted');
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     throw new Error(`Nominatim API returned status ${response.status}`);

@@ -37,7 +37,8 @@ function startSimulation(tripData) {
     signals: augmentedSignals,
     distanceTraveled: 0,
     totalDistance,
-    intervalId: null
+    intervalId: null,
+    abortController: new AbortController()
   };
 
   logger.info(`Starting simulation for trip ${tripId} (distance: ${totalDistance.toFixed(2)} km)`);
@@ -130,7 +131,17 @@ async function completeTrip(tripId) {
         const destHospital = queryOne(db, 'SELECT * FROM hospitals WHERE id = ?', [currentTrip.dest_hospital_id]);
         if (!destHospital) throw new Error('No destination hospital found');
         
-        const routeData = await routingService.getRoute(currentTrip.pickup_lat, currentTrip.pickup_lng, destHospital.lat, destHospital.lng);
+        const routeData = await routingService.getRoute(currentTrip.pickup_lat, currentTrip.pickup_lng, destHospital.lat, destHospital.lng, { signal: sim.abortController.signal });
+
+        // Re-check trip status AFTER the async getRoute — cancellation may have
+        // occurred while the OSRM request was in flight.
+        const recheckTrip = tripModel.getById(db, tripId);
+        if (!recheckTrip || recheckTrip.status !== 'active') {
+          logger.info(`Trip ${tripId} was cancelled during hospital routing. Aborting leg 2.`);
+          activeSimulations.delete(tripId);
+          return;
+        }
+
         const virtualSignals = routingService.generateVirtualSignals(routeData.polyline);
 
         const routeName = `Pickup to ${destHospital.name}`;
@@ -167,6 +178,16 @@ async function completeTrip(tripId) {
         });
       } catch (err) {
         logger.error(`Failed to route to hospital for trip ${tripId}: ${err.message}`);
+
+        // If the trip was cancelled/stopped while routing, or request was aborted,
+        // do not overwrite the trip or ambulance state.
+        const currentTripInCatch = tripModel.getById(db, tripId);
+        if (!currentTripInCatch || currentTripInCatch.status !== 'active' || (sim && sim.abortController && sim.abortController.signal.aborted) || err.message.includes('abort') || err.name === 'AbortError') {
+          logger.info(`Trip ${tripId} leg 2 routing failed or aborted (trip status: ${currentTripInCatch ? currentTripInCatch.status : 'not found'}).`);
+          activeSimulations.delete(tripId);
+          return;
+        }
+
         // Clean up signals for this trip
         if (sim && sim.signals) {
           for (const signal of sim.signals) {
@@ -224,6 +245,10 @@ async function completeTrip(tripId) {
 function stopSimulation(tripId) {
   const sim = activeSimulations.get(tripId);
   if (sim) {
+    // Abort any in-flight OSRM/Nominatim requests for this trip
+    if (sim.abortController) {
+      sim.abortController.abort();
+    }
     if (sim.intervalId) {
       clearInterval(sim.intervalId);
       sim.intervalId = null;
@@ -266,6 +291,13 @@ function recoverInterruptedTrips(db) {
     logger.info(`Startup recovery: resetting ${greenSignals.length} green signal(s) back to red.`);
     run(db, "UPDATE signals SET current_state = 'red' WHERE current_state = 'green'");
   }
+
+  // Ensure any orphaned en_route ambulances (without active trips) are restored to idle
+  const orphanedAmbs = queryAll(db, "SELECT id FROM ambulances WHERE status = 'en_route'");
+  if (orphanedAmbs.length > 0) {
+    logger.info(`Startup recovery: resetting ${orphanedAmbs.length} orphaned en_route ambulance(s) back to idle.`);
+    run(db, "UPDATE ambulances SET status = 'idle' WHERE status = 'en_route'");
+  }
 }
 
-module.exports = { startSimulation, stopSimulation, recoverInterruptedTrips };
+module.exports = { startSimulation, stopSimulation, recoverInterruptedTrips, completeTrip };
