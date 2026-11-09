@@ -1,302 +1,515 @@
-# Green Corridor — Smart Traffic Management for Ambulances
+# Green Corridor — Smart Traffic Management for Emergency Vehicles
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18.19.0-brightgreen.svg)](https://nodejs.org)
+[![Frontend: React](https://img.shields.io/badge/Frontend-React_18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![Backend: Express](https://img.shields.io/badge/Backend-Express_4-lightgrey?logo=express)](https://expressjs.com/)
 
-Green Corridor is an automated smart emergency traffic management demonstration system designed to minimize transit delays for emergency vehicles. When an emergency trip or emergency dispatch is initiated, the system continuously tracks vehicle progress along its route, calculates dynamic arrival times (ETA) at every upcoming traffic signal, and automatically transitions signals to **green** before the vehicle arrives. Nearby police checkpoints receive instant alerts with distance and ETA metrics so traffic personnel can clear intersections in advance.
+Green Corridor is an emergency-vehicle traffic-priority demonstration system. It simulates ambulance movement along road routes, estimates arrival times at upcoming signals, and gives an approaching ambulance priority at relevant intersections by changing their simulated state to green. The application also provides custom route planning, two-stage ambulance dispatch, live map updates, police-alert notifications, trip history, and analytics.
 
----
-
-## 1. Problem Statement and Purpose
-
-Traffic congestion in urban centers frequently causes severe delays for emergency ambulances, directly impacting patient survival rates during critical "golden hour" medical crises. Traditional sirens rely on driver courtesy and manual observation, which fail at gridlocked junctions.
-
-Green Corridor addresses this problem by providing:
-- **Automated Traffic Light Preemption**: Signals automatically flip to green when an approaching emergency ambulance crosses an ETA proximity threshold (default: 30 seconds ahead).
-- **Intelligent Emergency Dispatch**: Given an emergency pickup location, the system automatically dispatches the nearest available idle ambulance, routes it to the patient, waits 15 seconds for patient stabilization/boarding, and navigates directly to the nearest hospital.
-- **Police Checkpoint Notifications**: Law enforcement and traffic officers near upcoming signals receive real-time alerts via WebSocket to secure intersections manually if needed.
-- **Normal Signal Cycling & Priority Override**: Intersections cycle through standard red/green phases during active trips and immediately yield to emergency green-corridor priority, resuming from a safe red phase once the vehicle passes.
+> **Project scope:** Green Corridor demonstrates emergency-vehicle coordination in a local web application. Ambulance movement, route progress, and intersection-state changes are modelled by the application for project evaluation and demonstration.
 
 ---
 
-## 2. Key Features
+## Contents
 
-- **Real-Time Simulation Engine**: High-frequency vehicle simulation (default: 2000 ms ticks at 45 km/h) tracking position along high-fidelity route polylines.
-- **Two-Leg Emergency Dispatch**: Automated multi-stage dispatch workflow (`to_pickup` -> 15s wait at `at_pickup` -> `to_hospital` -> `completed`).
-- **Dynamic Routing & Virtual Signal Generation**: Integration with OpenStreetMap (Nominatim for geocoding and OSRM for driving routes) with synthetic signal generation every ~900 meters.
-- **Route Preview without Persistence**: Preview custom A → B routes, distances, and virtual signal counts without creating permanent database records.
-- **Configurable Maximum Route Distance**: Enforces a configurable distance ceiling (`MAX_ROUTE_DISTANCE_KM`, default: 25 km) returning HTTP 422 before saving invalid routes or stranding ambulances.
-- **Rate-Limited External Requests**: Internal request queue ensuring compliant spacing (>= 1.1s) for public Nominatim and OSRM servers.
-- **Robust Abort and Timeout Handling**: Response-body timeouts and user cancellations cleanly restore ambulances to `idle` and reset signals to `red`.
-- **Startup Recovery & Safe Schema Migrations**: Detects interrupted trips upon startup, safely terminates them with `end_time`, restores orphaned ambulances to `idle`, resets green signals, and applies non-destructive schema migrations.
+- [Problem and objective](#problem-and-objective)
+- [Features](#features)
+- [How the system works](#how-the-system-works)
+- [Technology stack](#technology-stack)
+- [Project structure](#project-structure)
+- [Run the project locally](#run-the-project-locally)
+- [Environment configuration](#environment-configuration)
+- [Tests and production build](#tests-and-production-build)
+- [API reference](#api-reference)
+- [Seed data](#seed-data)
+- [External services and attribution](#external-services-and-attribution)
+- [Runtime and deployment notes](#runtime-and-deployment-notes)
+- [Troubleshooting](#troubleshooting)
+- [Development notes](#development-notes)
+- [License](#license)
 
----
+## Problem and objective
 
-## 3. Technology Stack
+Emergency vehicles can lose valuable time in congested urban traffic. A coordinated green corridor can help reduce delays by preparing intersections before an emergency vehicle reaches them.
 
-- **Backend**:
-  - Runtime: Node.js (>= 18.19.0 required for test-runner mock timers; tested with Node.js LTS)
-  - Framework: Express 4.18
-  - Real-Time Communication: Socket.IO 4.7
-  - Database: SQLite via `sql.js` (WebAssembly SQLite engine with automated disk flushing)
-  - Testing: Built-in Node test runner (`node:test`, `node:assert`)
-- **Frontend**:
-  - Framework: React 18 with Vite 5 (ES Modules)
-  - Styling: Tailwind CSS
-  - Mapping: Leaflet.js with React-Leaflet and OpenStreetMap tiles
-  - Charts & Data Viz: Recharts
-  - HTTP Client: Axios
+Green Corridor demonstrates this concept in a local web application. A user can start a trip on a predefined corridor, create a custom route between two locations, or call an ambulance to a pickup point. The backend simulates vehicle movement, calculates signal ETAs, applies signal priority, and sends real-time updates to the frontend.
 
----
+The purpose of the project is to demonstrate the software workflow and coordination logic behind an emergency traffic-priority system. It is not a replacement for a real traffic-management or emergency-dispatch platform.
 
-## 4. Architecture and Project Structure
+## Features
 
-```
+### Emergency trips and ambulance dispatch
+
+- Start a trip using a predefined route.
+- Preview and start a custom A-to-B route.
+- Call an ambulance using an address or latitude/longitude coordinates.
+- Select the nearest available ambulance based on the registered base-hospital location.
+- Route the ambulance from its base to the pickup location, wait for 15 seconds at pickup, and then route it to the nearest configured hospital.
+- Track trip phases: `to_pickup`, `at_pickup`, `to_hospital`, and `completed`.
+- Cancel an active trip and release the ambulance back to the `idle` state.
+
+### Route planning
+
+- Use Nominatim to convert typed addresses into coordinates.
+- Use OSRM to calculate a driving route and return its distance, duration, and geometry.
+- Preview a custom route without saving it to the database.
+- Save a custom route when the user proceeds to start the trip.
+- Generate virtual signal points along custom route geometry.
+- Enforce a configurable maximum route distance (default: 25 km).
+
+### Signal priority and alerts
+
+- Calculate the ETA from a simulated ambulance to upcoming signals.
+- Trigger emergency green priority when the signal is within the configured ETA threshold (default: 30 seconds).
+- Revert priority after the ambulance passes the signal, while considering other trips that may still need it.
+- Simulate normal red/green cycling on registered active-trip corridors.
+- Suspend normal cycling while emergency priority holds a signal.
+- Broadcast alert events to connected dashboard clients over Socket.IO.
+- View and acknowledge stored alerts in the dashboard.
+
+### Dashboard, history, and analytics
+
+- View ambulance positions and active trip routes on a Leaflet map.
+- See the live state of signals associated with active trips.
+- Browse predefined routes and their signal locations.
+- Review completed and cancelled trips.
+- View signal-priority counts and trip analytics.
+
+### Reliability features
+
+- Serialize external routing and geocoding requests to respect public-service rate limits.
+- Apply request timeouts and support cancellation of in-flight routing operations.
+- Recover interrupted active trips on backend startup.
+- Restore orphaned ambulances to `idle` and reset stale green signal states during recovery.
+- Apply non-destructive schema migrations for supported legacy database columns.
+
+## How the system works
+
+### 1. Predefined or custom trip
+
+1. The user selects an idle ambulance.
+2. The user chooses a predefined route or enters a start and end address for a custom route.
+3. For a custom route, the frontend requests a preview. The backend geocodes the addresses, asks OSRM for a driving route, checks the configured distance limit, and generates virtual signal points.
+4. The custom route is persisted when the user starts the trip.
+5. The simulation advances the ambulance along the route polyline and calculates ETAs for upcoming signals.
+
+### 2. Emergency ambulance dispatch
+
+The dispatch workflow uses two route legs:
+
+1. **Emergency request:** The user enters a pickup address or coordinates.
+2. **Nearest hospital:** The backend finds the configured hospital closest to the pickup point using straight-line (Haversine) distance.
+3. **Nearest available ambulance:** The backend considers idle ambulances whose registered base hospital can be resolved, then selects the one closest to the pickup point using the base-hospital coordinates. The ambulance is reserved as `en_route`.
+4. **Leg 1 — base to pickup:** OSRM calculates the driving route from the ambulance's base hospital to the pickup point. The backend checks the route-distance limit before creating the dispatch trip and route signals.
+5. **Pickup wait:** On arrival, the trip enters `at_pickup` and waits 15 seconds to represent patient boarding.
+6. **Leg 2 — pickup to hospital:** The backend calculates the route from the pickup point to the selected hospital. If routing fails or the configured distance limit is exceeded, the trip is terminated safely and the ambulance is released.
+7. **Completion:** On arrival at the hospital, the trip is marked `completed` and the ambulance returns to `idle`.
+
+### 3. Signal ETA and priority
+
+The simulation periodically advances the ambulance along its route. For each upcoming signal, ETA is calculated from the remaining route distance and configured simulation speed:
+
+\[
+\text{ETA (seconds)} = \frac{\text{Distance to signal (km)}}{\text{Speed (km/h)} / 3600}
+\]
+
+When the ETA is within `PRIORITY_THRESHOLD_SECONDS`, the signal is given emergency priority and an alert event is broadcast. After the ambulance passes, the priority hold is released unless another active trip still requires the same signal.
+
+Normal signal cycling is a separate simulation service. It operates on signals registered to active trip routes, with emergency priority taking precedence over the normal cycle.
+
+## Technology stack
+
+| Area | Technologies |
+|---|---|
+| Frontend | React 18, Vite 5, React Router, Tailwind CSS |
+| Map | Leaflet, React-Leaflet, OpenStreetMap tiles |
+| Charts | Recharts |
+| HTTP client | Axios |
+| Backend | Node.js, Express 4 |
+| Real-time updates | Socket.IO |
+| Database | SQLite through `sql.js` |
+| External routing | OpenStreetMap Nominatim and OSRM |
+| Tests | Node.js built-in test runner (`node:test`, `node:assert`) |
+
+## Project structure
+
+```text
 green-corridor/
 ├── backend/
-│   ├── data/                  # SQLite database storage (green_corridor.db)
+│   ├── data/                  # Created at runtime; local SQLite database
 │   ├── src/
-│   │   ├── config.js          # Centralized configuration & environment loader
-│   │   ├── index.js           # Server bootstrap and route registration
-│   │   ├── socketManager.js   # Socket.IO instance management
-│   │   ├── controllers/       # HTTP request handlers (routes, trips, dispatch, alerts, ambulances)
-│   │   ├── db/                # DB connection, schema migrations, helpers, seed data
-│   │   ├── models/            # Data access objects (trips, routes, signals, ambulances, events)
-│   │   ├── routes/            # Express routers
-│   │   ├── services/          # Simulation engine, ETA calculation, signal cycling, geocoding, routing
-│   │   └── utils/             # Haversine distance, geo math, request queue, logger
-│   └── tests/                 # Automated test suites using node:test
+│   │   ├── config.js          # Environment-based configuration
+│   │   ├── index.js           # Express and Socket.IO server bootstrap
+│   │   ├── controllers/       # API request handlers
+│   │   ├── db/                # Database connection, schema, migrations, seed data
+│   │   ├── models/            # Database access functions
+│   │   ├── routes/            # Express route definitions
+│   │   ├── services/          # Simulation, ETA, signal cycling, routing, geocoding
+│   │   └── utils/             # Geographic helpers, request queues, logging
+│   ├── tests/                 # Backend automated tests
+│   ├── .env.example
+│   ├── package.json
+│   └── package-lock.json
 ├── frontend/
 │   ├── src/
-│   │   ├── api/               # Axios REST API client modules
-│   │   ├── components/        # UI components (Map, Sidebar, Alerts, Ambulances, Signals)
-│   │   ├── hooks/             # WebSocket and state management hooks
-│   │   ├── pages/             # Dashboard, Predefined Routes, Trip History, Analytics
-│   │   └── utils/             # Alert normalizer and helper functions
-│   └── tests/                 # Frontend helper unit tests (ES modules)
-├── scripts/                   # PowerShell verification and integration test scripts
-├── .env.example               # Root environment variable template
-├── LICENSE                    # MIT License
-└── README.md                  # System documentation
+│   │   ├── api/               # REST API helpers
+│   │   ├── components/        # Reusable UI and map components
+│   │   ├── hooks/             # WebSocket and application hooks
+│   │   ├── pages/             # Dashboard, ambulances, routes, history, analytics
+│   │   └── utils/             # Frontend helpers
+│   ├── tests/                 # Frontend helper tests
+│   ├── .env.example
+│   ├── package.json
+│   └── package-lock.json
+├── scripts/                   # PowerShell integration/verification scripts
+├── .env.example               # Root-level backend environment template
+├── FEATURES.md                # Implemented features and extension points
+├── LICENSE
+└── README.md
 ```
 
----
+## Run the project locally
 
-## 5. Emergency Dispatch Workflow
-
-1. **Patient Call**: User enters an emergency address or coordinates in the Emergency Dispatch modal (`POST /api/dispatch/call`).
-2. **Nearest Hospital Selection**: System scans all registered hospitals and identifies the closest hospital to the patient using Haversine calculation.
-3. **Nearest Idle Ambulance Selection**: System identifies all ambulances in `idle` state, calculates distance from their base hospitals to the patient, and selects the nearest unit. The ambulance is immediately reserved as `en_route`.
-4. **Leg 1 (Base -> Pickup)**: OSRM calculates the driving polyline to the patient. If the distance exceeds `MAX_ROUTE_DISTANCE_KM`, the request is rejected with HTTP 422 and the ambulance reverts to `idle`. Otherwise, virtual signals are generated and simulation begins with trip phase `to_pickup`.
-5. **Arrival at Pickup**: When the ambulance reaches the patient, the trip transitions to `at_pickup`. Any Leg 1 green signals are reverted. The ambulance pauses for **15 seconds** to board the patient.
-6. **Leg 2 (Pickup -> Hospital)**: After 15 seconds, the system queries OSRM for a route from the pickup location to the nearest hospital. If route calculation fails or exceeds the distance limit, the trip safely terminates with an explicit reason (`leg2_distance_exceeded` or `leg2_routing_timeout`) and releases the ambulance. If successful, phase updates to `to_hospital` and simulation continues.
-7. **Destination Arrival**: When the ambulance reaches the hospital, the trip marks as `completed`, the final phase is set to `completed`, the ambulance status resets to `idle`, and all signals return to standard state.
-
----
-
-## 6. Custom Routes & External API Integrations
-
-- **Nominatim Geocoding**: Converts freeform addresses (e.g. "Marina Beach, Chennai") into latitude and longitude coordinates.
-- **OSRM Driving Routes**: Generates real driving polylines between coordinates.
-- **Request Serialization Queue**: A dedicated queue (`backend/src/utils/requestQueue.js`) enforces a minimum interval of 1100 ms between outbound calls to comply with OpenStreetMap server usage policies.
-- **Virtual Signal Generation**: `routingService.generateVirtualSignals` places virtual checkpoints at ~900-meter intervals along custom routes, omitting the final 200 meters.
-- **Non-Persistent Previews**: `POST /api/routes/preview` computes polylines, distances, and virtual signals without inserting rows into `routes` or `signals`. Custom routes are persisted only when the user clicks "Start Trip".
-
----
-
-## 7. Traffic Signal Control & Normal Cycling
-
-- **ETA Calculation**: On every simulation tick, `etaService.processSignals` evaluates the ambulance's distance from each upcoming signal and calculates arrival time based on configured speed:
-  $$\text{ETA (seconds)} = \frac{\text{Distance to Signal (km)}}{\text{Speed (km/h)} / 3600}$$
-- **Green Preemption**: When ETA falls below `PRIORITY_THRESHOLD_SECONDS` (default: 30s), the signal triggers priority to `green`, logs a `priority_events` record, and broadcasts an alert to police checkpoints.
-- **Reversion on Passing**: When the ambulance passes a signal (with a 50m tolerance), the signal reverts to `red`, unless another active trip currently requires that signal.
-- **Normal Signal Cycling**: Intersections along active trip routes run a background cycle (`SIGNAL_RED_DURATION_S` -> `SIGNAL_GREEN_DURATION_S`). Emergency preemption suspends the normal cycle and locks the signal green. When emergency priority is released, the signal resumes cycling safely from `red`. Inactive seeded routes do not cycle randomly.
-
----
-
-## 8. Dashboard, Alerts, Analytics & History
-
-- **Interactive Live Map**: Displays real-time vehicle movement, route polylines, and signal states. Only signals belonging to active trip corridors are rendered on the map.
-- **Predefined Routes Page**: Displays configured corridors (`is_custom = 0`) with lightweight, lazy-rendered Leaflet previews to minimize DOM load.
-- **Police Alert Feed**: Lists incoming preemption alerts. Supports both WebSocket live events and REST history normalization, eliminating `Invalid Date` discrepancies. Officers can acknowledge alerts directly (`PATCH /api/alerts/:id/acknowledge`).
-- **Analytics**: Displays total trips facilitated (completed trips), cancelled trips, total signals prioritized, and estimated time saved (documented at 15 seconds saved per prioritized signal wait).
-- **Trip History**: Detailed logs showing ambulance vehicle numbers, route names, destination hospitals, total signals cleared, status (`completed` or `cancelled`), start times, and journey durations.
-
----
-
-## 9. Database Architecture
-
-SQLite is managed via `sql.js` in memory and periodically persisted to disk at `backend/data/green_corridor.db`.
-
-```
-hospitals (id, name, lat, lng)
-    ▲
-    │ (hospital name string match)
-ambulances (id, vehicle_number, driver_name, hospital, status)
-    ▲
-    │ (ambulance_id)
-trips (id, ambulance_id, route_id, status, phase, pickup_lat, pickup_lng, dest_hospital_id, start_time, end_time)
-    │
-    ├────────► routes (id, name, start_name, end_name, polyline, is_custom)
-    │              ▲
-    │              │ (route_id)
-    │          signals (id, route_id, name, lat, lng, order_in_route, current_state)
-    │              ▲
-    │              │ (signal_id)
-    └────────► priority_events (id, trip_id, signal_id, triggered_at, eta_at_trigger, acknowledged)
-```
-
----
-
-## 10. Installation & Setup
+The frontend and backend run as two separate processes. Keep both terminals open while using the application.
 
 ### Prerequisites
 
-- **Node.js**: Version **>= 18.19.0** (required for `node:test` mock timers).
-- **npm**: Version 8+ or 9+.
-- Operating Systems: Windows (PowerShell), macOS, or Linux.
+- **Git** to clone the repository.
+- **Node.js:** Version `>=18.19.0`, as specified by the backend package. A currently supported Node.js LTS release is recommended.
+- **npm:** Installed with Node.js.
+- **Internet access:** Required for live address geocoding, OSRM driving routes, and OpenStreetMap map tiles.
 
-### 1. Clone & Install Dependencies
+Check your installed versions:
 
 ```bash
-# Clone the repository
-git clone <repository-url>
+node --version
+npm --version
+git --version
+```
+
+### Step 1 — Clone the repository
+
+Open PowerShell, Windows Terminal, macOS Terminal, or a Linux shell and run:
+
+```bash
+git clone https://github.com/tarangg0601-arch/green-corridor.git
 cd green-corridor
+```
 
-# Install Backend Dependencies
+### Step 2 — Install backend dependencies
+
+```bash
 cd backend
-npm install
+npm ci
+```
 
-# Install Frontend Dependencies
+`npm ci` installs the exact dependency versions recorded in `backend/package-lock.json`.
+
+Create the backend environment file from the template. Do this only if `backend/.env` does not already exist.
+
+**Windows PowerShell:**
+
+```powershell
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+**macOS / Linux:**
+
+```bash
+[ -f .env ] || cp .env.example .env
+```
+
+The default backend configuration is suitable for a local run. See [Environment configuration](#environment-configuration) if you need to change ports, database location, simulation speed, or external service URLs.
+
+### Step 3 — Install frontend dependencies
+
+Open a second terminal, or return to the repository root in the current terminal:
+
+```bash
 cd ../frontend
-npm install
+npm ci
 ```
 
-### 2. Environment Configuration
+Create the frontend environment file if it does not already exist.
 
-Create `.env` files from their respective `.env.example` templates:
+**Windows PowerShell:**
 
-**Backend (`backend/.env`):**
-```env
-PORT=3001
-DB_PATH=./data/green_corridor.db
-SIMULATION_TICK_MS=2000
-AMBULANCE_SPEED_KMH=45
-PRIORITY_THRESHOLD_SECONDS=30
-SIGNAL_GREEN_DURATION_S=30
-SIGNAL_RED_DURATION_S=45
-MAX_ROUTE_DISTANCE_KM=25
+```powershell
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-**Frontend (`frontend/.env`):**
-```env
-VITE_API_URL=http://localhost:3001/api
-VITE_WS_URL=http://localhost:3001
+**macOS / Linux:**
+
+```bash
+[ -f .env ] || cp .env.example .env
 ```
 
----
+### Step 4 — Start the backend
 
-## 11. Running the Application
-
-### Start the Backend Server
+Open **Terminal 1** with the current directory set to the cloned `green-corridor` repository root, then run:
 
 ```bash
 cd backend
 npm start
-# Or for development with auto-reload:
+```
+
+For development with Node's watch mode, use:
+
+```bash
 npm run dev
 ```
-Backend runs on `http://localhost:3001`. On first run, it initializes the SQLite database and seeds default hospitals, ambulances, and Chennai corridors.
 
-### Start the Frontend Client
+By default, the API and Socket.IO server listen on:
+
+```text
+http://localhost:3001
+```
+
+On the first start, the backend creates `backend/data/green_corridor.db`, initializes the schema, and seeds the sample hospitals, ambulances, routes, signals, and checkpoints. The database is stored locally and is not included in the Git repository. Existing local database files are reused on subsequent starts.
+
+Keep this terminal running.
+
+### Step 5 — Start the frontend
+
+Open **Terminal 2** with the current directory set to the cloned `green-corridor` repository root, then run:
 
 ```bash
 cd frontend
 npm run dev
 ```
-Frontend runs on `http://localhost:5173`. Open your browser to access the dashboard.
 
----
+Vite prints the local development URL. By default, open:
 
-## 12. Running Tests
+```text
+http://localhost:5173
+```
 
-Both backend and frontend utilize native Node test runners with cross-platform scripts (`node --test`).
+Keep the frontend and backend terminals running together. The frontend uses `VITE_API_URL` for REST requests and `VITE_WS_URL` for Socket.IO connections.
+
+### Step 6 — Check that the backend is responding
+
+With the backend running, open these URLs in a browser:
+
+- `http://localhost:3001/api/ambulances` — sample ambulance records.
+- `http://localhost:3001/api/hospitals` — configured hospitals.
+- `http://localhost:3001/api/routes` — available routes.
+- `http://localhost:3001/api/alerts/summary` — dashboard summary data.
+
+Then open `http://localhost:5173` and use the dashboard.
+
+### Local run checklist
+
+- [ ] Backend starts without an initialization error.
+- [ ] Frontend starts and opens in the browser.
+- [ ] The dashboard displays seeded routes and ambulances.
+- [ ] The browser can load the map tiles (internet connection required).
+- [ ] A predefined trip can be started and stopped.
+- [ ] A custom route preview can be generated (internet connection required).
+- [ ] An ambulance dispatch can be submitted using a pickup location (internet connection required for address geocoding/routing).
+
+## Environment configuration
+
+### Backend — `backend/.env`
+
+The backend loads environment variables from `backend/.env` when it is started from the `backend` directory. Begin with `backend/.env.example`.
+
+| Variable | Default | Description |
+|---|---:|---|
+| `PORT` | `3001` | Backend HTTP and Socket.IO port. |
+| `DB_PATH` | `./data/green_corridor.db` | SQLite database file path, relative to the backend working directory unless an absolute path is provided. |
+| `SIMULATION_TICK_MS` | `2000` | Interval between ambulance simulation updates. |
+| `AMBULANCE_SPEED_KMH` | `45` | Simulated ambulance speed. |
+| `PRIORITY_THRESHOLD_SECONDS` | `30` | ETA threshold for emergency signal priority. |
+| `SIGNAL_GREEN_DURATION_S` | `30` | Normal-cycle green duration in seconds. |
+| `SIGNAL_RED_DURATION_S` | `45` | Normal-cycle red duration in seconds. |
+| `MAX_ROUTE_DISTANCE_KM` | `25` | Maximum accepted custom/dispatch route-leg distance. |
+| `OSRM_BASE_URL` | Public OSRM demo server | Optional OSRM base URL override. |
+| `NOMINATIM_BASE_URL` | Public Nominatim server | Optional Nominatim base URL override. |
+| `HTTP_TIMEOUT_MS` | `8000` | Timeout for an external HTTP request. |
+
+The last three variables are optional overrides supported by the backend configuration; they are not required for the default local setup.
+
+### Frontend — `frontend/.env`
+
+Begin with `frontend/.env.example`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `VITE_API_URL` | `http://localhost:3001/api` | Base URL for backend REST requests. |
+| `VITE_WS_URL` | `http://localhost:3001` | Base URL for Socket.IO. |
+
+Vite reads frontend environment variables when the development server starts. Restart Vite after changing the `.env` file.
+
+## Tests and production build
+
+Run the commands from the relevant project directory.
+
+### Backend tests
 
 ```bash
-# Run backend test suites (13 tests)
 cd backend
 npm test
+```
 
-# Run frontend test suites (4 tests)
-cd ../frontend
+The backend test command uses Node's built-in test runner. The suites cover dispatch and hospital validation, API errors, the ambulance journey, cancellation, ETA/geographic helpers, request throttling, route-distance validation, routing timeouts, signal cycling, and startup recovery/migrations.
+
+Some tests that call public Nominatim or OSRM endpoints require internet access. If those services are unavailable or rate-limited, the live integration check may be skipped; mocked tests do not replace a successful live-service check.
+
+### Frontend tests
+
+```bash
+cd frontend
 npm test
+```
 
-# Verify frontend production build
+### Frontend production build
+
+```bash
+cd frontend
 npm run build
 ```
 
----
+Vite writes the production assets to `frontend/dist/`. To preview the built frontend locally:
 
-## 13. API Reference
+```bash
+npm run preview
+```
 
-### Ambulances
-- `GET /api/ambulances` — List all ambulances.
-- `POST /api/ambulances` — Register an ambulance (`{ vehicleNumber, driverName, hospital }`). Returns 400 if hospital is invalid; returns 409 if vehicle number already exists.
+The backend and frontend are separate applications; building the frontend does not start the backend.
 
-### Hospitals
-- `GET /api/hospitals` — List all registered hospitals with geographical coordinates.
+## API reference
 
-### Routes
-- `GET /api/routes` — List all routes with embedded signal lists.
-- `GET /api/routes/:id` — Get details of a single route.
-- `POST /api/routes/preview` — Preview a custom route without persisting to the database (`{ startAddress, endAddress }` or `{ startLat, startLng, endLat, endLng }`). Returns 422 if distance exceeds `MAX_ROUTE_DISTANCE_KM`.
-- `POST /api/routes/custom` — Create and persist a custom route with virtual signals.
+The backend uses the `/api` prefix. The following endpoints are mounted in the current application.
 
-### Trips & Dispatch
-- `GET /api/trips?status=active|completed|cancelled` — List trips filtered by status.
-- `GET /api/trips/:id` — Get trip details including priority events.
-- `POST /api/trips/start` — Start a trip (`{ ambulanceId, routeId }`).
-- `POST /api/trips/:id/stop` — Cancel an active trip.
-- `POST /api/dispatch/call` — Emergency dispatch (`{ address }` or `{ lat, lng }`). Automatically reserves nearest ambulance and routes two legs.
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/api/ambulances` | List ambulances. |
+| `POST` | `/api/ambulances` | Register an ambulance. Requires `vehicleNumber`, `driverName`, and a configured `hospital`. |
+| `GET` | `/api/hospitals` | List configured hospitals and coordinates. |
+| `GET` | `/api/routes` | List routes and their signals. |
+| `GET` | `/api/routes/:id` | Get a route by ID. |
+| `POST` | `/api/routes/preview` | Calculate a custom route preview without persisting it. |
+| `POST` | `/api/routes/custom` | Create and persist a custom route. |
+| `GET` | `/api/trips` | List trips; optional `status` query filter. |
+| `GET` | `/api/trips/:id` | Get trip details. |
+| `POST` | `/api/trips/start` | Start a trip using `ambulanceId` and `routeId`. |
+| `POST` | `/api/trips/:id/stop` | Stop/cancel an active trip. |
+| `POST` | `/api/dispatch/call` | Request an ambulance using an address or coordinates. |
+| `GET` | `/api/alerts` | List recent alerts; supports a `limit` query parameter. |
+| `PATCH` | `/api/alerts/:id/acknowledge` | Acknowledge an alert. |
+| `GET` | `/api/alerts/summary` | Retrieve summary and analytics data. |
 
-### Alerts & Analytics
-- `GET /api/alerts?limit=50` — List recent priority alerts.
-- `PATCH /api/alerts/:id/acknowledge` — Mark a police alert as acknowledged.
-- `GET /api/alerts/summary` — Aggregate statistics (completed trips, cancelled trips, signals prioritized, chart data).
+### Example requests
 
----
+List hospitals:
 
-## 14. Seed Data & Route Distances
+```bash
+curl http://localhost:3001/api/hospitals
+```
 
-The database is seeded with real road geometries in **Chennai, India**, calculated accurately using `geo.totalRouteDistance`:
+Preview a route by address:
 
-1. **Apollo Hospital to Adyar Signal**: **6.31 km**, 4 traffic signals along Anna Salai.
-2. **MIOT Hospital to Guindy**: **4.08 km**, 3 traffic signals along Mount Poonamallee Road.
-3. **Rajiv Gandhi Hospital to Central Station**: **5.38 km**, 5 traffic signals along EVR Periyar Salai.
+```bash
+curl -X POST http://localhost:3001/api/routes/preview \
+  -H "Content-Type: application/json" \
+  -d '{"startAddress":"Apollo Hospital, Chennai","endAddress":"Chennai Central Station"}'
+```
 
----
+Call an ambulance using coordinates:
 
-## 15. Known Limitations
+```bash
+curl -X POST http://localhost:3001/api/dispatch/call \
+  -H "Content-Type: application/json" \
+  -d '{"lat":13.0604,"lng":80.2496}'
+```
 
-- **Simulated GPS**: Vehicle movement and positions are mathematically interpolated along OSRM polylines; the system does not interface with real-world GPS trackers.
-- **Virtual Signals**: On custom routes, virtual signals are generated at ~900m mathematical intervals and do not correspond to verified real-world physical signal infrastructure.
-- **Base Hospital Ambulance Relocation**: Ambulances are assumed to be stationed at their registered hospital base when in `idle` state.
-- **Authentication**: This is an educational and engineering demonstration prototype; no user authentication or RBAC is implemented. Do not deploy to an unsecured public network.
-- **Public OSRM & Nominatim Services**: Routing and geocoding rely on free public OpenStreetMap endpoints which are rate-limited and offer no SLA. For production use, self-host local OSRM and Nominatim instances.
+Start a predefined trip (replace the IDs with valid values returned by the API):
 
----
+```bash
+curl -X POST http://localhost:3001/api/trips/start \
+  -H "Content-Type: application/json" \
+  -d '{"ambulanceId":1,"routeId":1}'
+```
 
-## 16. Development Notes
+On Windows PowerShell, `curl` may be an alias for `Invoke-WebRequest`. You can use `Invoke-RestMethod` for the same requests. For example:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:3001/api/hospitals"
+```
+
+For endpoints that create records or start simulations, use the request bodies shown above and ensure that the referenced ambulance and route exist.
+
+## Seed data
+
+On a new database, the backend seeds five Chennai hospitals, three sample ambulances, three predefined route geometries, their signal points, and checkpoint/officer records.
+
+The predefined sample corridors are:
+
+| Corridor | Approximate distance from seeded polyline |
+|---|---:|
+| Apollo Hospital to Adyar Signal | 6.31 km |
+| MIOT Hospital to Guindy | 4.08 km |
+| Rajiv Gandhi Government Hospital to Central Station | 5.38 km |
+
+Distances are approximate measurements of the coordinates stored in the sample polylines, not live traffic distances. Actual OSRM distances may differ.
+
+## External services and attribution
+
+- **OpenStreetMap:** Map tiles and map data are provided by OpenStreetMap contributors. See [OpenStreetMap Copyright and License](https://www.openstreetmap.org/copyright).
+- **Nominatim:** Used for address geocoding. See the [Nominatim Usage Policy](https://operations.osmfoundation.org/policies/nominatim/).
+- **OSRM:** Used for driving-route calculation through the public OSRM demo service. See the [OSRM project](https://project-osrm.org/).
+
+The application displays routing attribution in the custom-route interface. Public geocoding and routing services are shared services with usage limits and no availability guarantee. The backend serializes calls to these services; do not remove the rate limiting or send bulk requests to the public endpoints. For sustained or production use, arrange a suitable hosted provider or operate your own services in accordance with their licenses and policies.
+
+## Runtime and deployment notes
+
+Green Corridor models emergency-vehicle coordination in a local software simulation. Ambulance positions advance along route geometry, and traffic-signal states are represented and updated by the application. Custom-route signal points are generated at approximately 900-metre intervals along the calculated road geometry.
+
+For ambulance selection, an idle ambulance is treated as being stationed at its registered base hospital. The nearest-ambulance calculation therefore uses base-hospital coordinates.
+
+The default maximum accepted route-leg distance is 25 km and can be configured through `MAX_ROUTE_DISTANCE_KM`.
+
+Address geocoding and driving-route calculation use the public Nominatim and OSRM demo services by default. Their usage policies and availability apply; the application serializes outbound requests and applies request timeouts. Internet access is required for address lookup, route calculation, and map tiles. For sustained deployments, choose an appropriately hosted provider or operate your own instances in accordance with the relevant usage policies and licenses.
+
+The documented setup is intended for local evaluation and demonstration. Before running the application in a shared or network-facing environment, configure the allowed frontend origin, access controls, database storage, and operational monitoring for that environment. Green Corridor is a software demonstration and should not be used to control real-world traffic or emergency response.
+
+## Troubleshooting
+
+### Backend does not start
+
+- Check that the installed Node.js version satisfies the backend requirement (`node --version`).
+- Confirm that backend dependencies were installed with `npm ci` from the `backend` directory.
+- Confirm that `backend/.env` exists and contains valid values.
+- Check whether port `3001` is already in use. If so, change `PORT` in `backend/.env` and update `VITE_API_URL` and `VITE_WS_URL` in `frontend/.env` to match.
+
+### Frontend cannot reach the backend
+
+- Make sure the backend terminal is still running.
+- Check `VITE_API_URL` and `VITE_WS_URL` in `frontend/.env`.
+- Restart the Vite development server after changing frontend environment variables.
+- Check the browser console and backend terminal for connection errors.
+
+### Custom route or ambulance dispatch fails
+
+- Confirm the computer has internet access.
+- Check whether the address can be resolved by Nominatim.
+- Try a shorter route within `MAX_ROUTE_DISTANCE_KM`.
+- Public Nominatim/OSRM services may temporarily reject or delay requests due to their usage policies or service availability.
+
+### Map tiles do not appear
+
+- Check internet access and browser network requests.
+- Map tiles are loaded from OpenStreetMap tile servers and are not bundled into the repository.
+
+### Database already contains old local data
+
+The backend reuses the database at `DB_PATH`. It does not reseed an existing database as though it were a new installation. If you need a clean demo database, stop the backend first and make a backup of the existing database before replacing or removing it. Never delete a database that contains data you need.
+
+## Development notes
 
 This project was built with AI-assisted development (Google Antigravity) from a detailed specification, then reviewed, tested and debugged.
 
-### Troubleshooting
-- **Port Conflicts**: If port 3001 or 5173 is occupied, adjust `PORT` in `backend/.env` or specify `--port` in Vite.
-- **Database Reset**: To reset the database to clean seed state, delete `backend/data/green_corridor.db` and restart the backend.
-- **Node.js Version**: If running backend tests fails with timer errors, ensure your active Node version is `>= 18.19.0`.
+## License
 
----
-
-## 17. License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
