@@ -16,6 +16,7 @@ const routeRoutes = require('./routes/routeRoutes');
 const tripRoutes = require('./routes/tripRoutes');
 const alertRoutes = require('./routes/alertRoutes');
 const dispatchRoutes = require('./routes/dispatchRoutes');
+const hospitalRoutes = require('./routes/hospitalRoutes');
 const simulationService = require('./services/simulationService');
 
 async function main() {
@@ -36,6 +37,7 @@ async function main() {
   app.use('/api/trips', tripRoutes);
   app.use('/api/alerts', alertRoutes);
   app.use('/api/dispatch', dispatchRoutes);
+  app.use('/api/hospitals', hospitalRoutes);
 
   const server = http.createServer(app);
   const io = new Server(server, {

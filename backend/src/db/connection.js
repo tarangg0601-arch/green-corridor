@@ -37,6 +37,10 @@ function getDB() {
   return db;
 }
 
+function setDB(customDb) {
+  db = customDb;
+}
+
 // Persist database to disk
 function saveDB() {
   if (!db) return;
@@ -46,4 +50,4 @@ function saveDB() {
   fs.writeFileSync(dbFilePath, buffer);
 }
 
-module.exports = { initDB, getDB, saveDB };
+module.exports = { initDB, getDB, setDB, saveDB };

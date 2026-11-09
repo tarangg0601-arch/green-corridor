@@ -1,67 +1,84 @@
+const config = require('../config');
 const logger = require('../utils/logger');
 const { haversineDistance } = require('../utils/geo');
+const { osrmQueue } = require('../utils/requestQueue');
 
-let lastRequestTime = 0;
-const MIN_INTERVAL_MS = 1100;
-
-async function throttle() {
-  const now = Date.now();
-  const elapsed = now - lastRequestTime;
-  if (elapsed < MIN_INTERVAL_MS) {
-    await new Promise(resolve => setTimeout(resolve, MIN_INTERVAL_MS - elapsed));
-  }
-  lastRequestTime = Date.now();
-}
-
+/**
+ * Fetch driving route between start and end coordinates via OSRM.
+ * @param {number} startLat
+ * @param {number} startLng
+ * @param {number} endLat
+ * @param {number} endLng
+ * @param {Object} [options]
+ * @param {AbortSignal} [options.signal]
+ * @returns {Promise<{polyline: Array<[number, number]>, distanceKm: number, durationSec: number}>}
+ */
 async function getRoute(startLat, startLng, endLat, endLng, options = {}) {
-  await throttle();
+  return osrmQueue.enqueue(async () => {
+    const baseUrl = config.osrmBaseUrl.replace(/\/+$/, '');
+    const url = `${baseUrl}/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
 
-  const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
+    logger.info(`Fetching OSRM route: (${startLat},${startLng}) -> (${endLat},${endLng})`);
 
-  logger.info(`Fetching OSRM route: (${startLat},${startLng}) -> (${endLat},${endLng})`);
+    const timeoutMs = config.httpTimeoutMs || 8000;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const combinedSignal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
 
-  const timeoutSignal = AbortSignal.timeout(8000);
-  const combinedSignal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
+    let response;
+    let data;
 
-  let response;
-  try {
-    response = await fetch(url, {
-      headers: {
-        'User-Agent': 'GreenCorridor-TrafficManagement/1.0 (student-project)'
-      },
-      signal: combinedSignal
-    });
-  } catch (err) {
-    if (err.name === 'TimeoutError') {
-      throw new Error('OSRM routing request timed out after 8s');
+    try {
+      response = await fetch(url, {
+        headers: {
+          'User-Agent': 'GreenCorridor-TrafficManagement/1.0 (student-project)'
+        },
+        signal: combinedSignal
+      });
+
+      if (!response.ok) {
+        const err = new Error(`OSRM API returned status ${response.status}`);
+        err.statusCode = 502;
+        throw err;
+      }
+
+      data = await response.json();
+    } catch (err) {
+      if (err.name === 'TimeoutError' || combinedSignal.aborted && timeoutSignal.aborted && !options.signal?.aborted) {
+        const timeoutErr = new Error(`OSRM routing request timed out after ${timeoutMs / 1000}s`);
+        timeoutErr.statusCode = 504;
+        timeoutErr.isTimeout = true;
+        throw timeoutErr;
+      }
+      if (err.name === 'AbortError' || options.signal?.aborted) {
+        const abortErr = new Error('OSRM routing request was aborted');
+        abortErr.name = 'AbortError';
+        abortErr.isAborted = true;
+        throw abortErr;
+      }
+      if (!err.statusCode) {
+        err.statusCode = 502;
+      }
+      throw err;
     }
-    if (err.name === 'AbortError') {
-      throw new Error('OSRM routing request was aborted');
+
+    if (!data || !data.routes || data.routes.length === 0) {
+      const noRouteErr = new Error('OSRM returned no routes');
+      noRouteErr.statusCode = 502;
+      throw noRouteErr;
     }
-    throw err;
-  }
 
-  if (!response.ok) {
-    throw new Error(`OSRM API returned status ${response.status}`);
-  }
+    const route = data.routes[0];
+    const coordinates = route.geometry.coordinates;
 
-  const data = await response.json();
+    // OSRM returns [lng, lat] — convert to [lat, lng] for our format
+    const polyline = coordinates.map(([lng, lat]) => [lat, lng]);
 
-  if (!data.routes || data.routes.length === 0) {
-    throw new Error('OSRM returned no routes');
-  }
-
-  const route = data.routes[0];
-  const coordinates = route.geometry.coordinates;
-
-  // OSRM returns [lng, lat] — convert to [lat, lng] for our format
-  const polyline = coordinates.map(([lng, lat]) => [lat, lng]);
-
-  return {
-    polyline,
-    distanceKm: route.distance / 1000,
-    durationSec: route.duration
-  };
+    return {
+      polyline,
+      distanceKm: route.distance / 1000,
+      durationSec: route.duration
+    };
+  }, { signal: options.signal });
 }
 
 /**

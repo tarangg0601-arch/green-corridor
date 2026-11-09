@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchAmbulances } from '../../api/ambulances';
-import { fetchRoutes, createCustomRoute } from '../../api/routes';
+import { fetchRoutes, createCustomRoute, previewCustomRoute } from '../../api/routes';
 import { startTrip } from '../../api/trips';
 
 const StartTripForm = ({ onClose, onSuccess }) => {
@@ -39,12 +39,11 @@ const StartTripForm = ({ onClose, onSuccess }) => {
     setCreatedRoute(null);
 
     try {
-      const route = await createCustomRoute({
+      const preview = await previewCustomRoute({
         startAddress: startAddress.trim(),
         endAddress: endAddress.trim()
       });
-      setCreatedRoute(route);
-      setSelectedRoute(String(route.id));
+      setCreatedRoute(preview);
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Failed to generate route';
       setRouteError(msg);
@@ -55,19 +54,32 @@ const StartTripForm = ({ onClose, onSuccess }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const routeId = mode === 'custom' && createdRoute ? createdRoute.id : parseInt(selectedRoute);
-    if (!selectedAmbulance || !routeId) return;
+    if (!selectedAmbulance) return;
 
     setLoading(true);
     try {
+      let routeId = parseInt(selectedRoute, 10);
+      if (mode === 'custom') {
+        if (!createdRoute) return;
+        // Persist the custom route only when user actually starts the trip
+        const savedRoute = await createCustomRoute({
+          startAddress: startAddress.trim(),
+          endAddress: endAddress.trim()
+        });
+        routeId = savedRoute.id;
+      }
+      if (!routeId) return;
+
       await startTrip({
-        ambulanceId: parseInt(selectedAmbulance),
+        ambulanceId: parseInt(selectedAmbulance, 10),
         routeId
       });
       onSuccess();
     } catch (err) {
       console.error('Failed to start trip', err);
-      alert('Error starting trip');
+      const msg = err.response?.data?.error || err.message || 'Error starting trip';
+      setRouteError(msg);
+      alert(msg);
     } finally {
       setLoading(false);
     }
@@ -174,7 +186,7 @@ const StartTripForm = ({ onClose, onSuccess }) => {
 
               {createdRoute && (
                 <div className="bg-green-50 border border-green-200 text-green-700 rounded p-2 text-xs">
-                  Route created: {createdRoute.name} ({createdRoute.signals?.length || 0} virtual signals)
+                  Route preview: {createdRoute.name} ({createdRoute.distanceKm ? `${createdRoute.distanceKm.toFixed(1)} km, ` : ''}{createdRoute.signals?.length || 0} virtual signals)
                 </div>
               )}
 

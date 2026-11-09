@@ -6,8 +6,9 @@ import CallAmbulanceForm from '../components/Sidebar/CallAmbulanceForm';
 import AlertPanel from '../components/Alerts/AlertPanel';
 import { useSocket } from '../hooks/useSocket';
 import { fetchTrips, stopTrip } from '../api/trips';
-import { fetchRoutes, fetchRoute } from '../api/routes';
+import { fetchRoute } from '../api/routes';
 import { fetchAlerts, acknowledgeAlert } from '../api/alerts';
+import { normalizeAlert } from '../utils/normalizeAlert';
 
 const Dashboard = () => {
   const [activeTrips, setActiveTrips] = useState([]);
@@ -30,20 +31,10 @@ const Dashboard = () => {
   useEffect(() => {
     const loadInitialData = async () => {
       try {
-        const [routesData, alertsData] = await Promise.all([
-          fetchRoutes(),
-          fetchAlerts()
-        ]);
-        const allSignalsMap = new Map();
-        routesData.forEach(r => {
-          if (r.signals) {
-            r.signals.forEach(s => allSignalsMap.set(s.id, s));
-          }
-        });
-        setSignals(Array.from(allSignalsMap.values()));
-        setAlerts(alertsData);
+        const alertsData = await fetchAlerts();
+        setAlerts((alertsData || []).map(normalizeAlert));
       } catch (err) {
-        console.error('Failed to load initial map data', err);
+        console.error('Failed to load initial data', err);
       }
     };
     loadInitialData();
@@ -53,8 +44,7 @@ const Dashboard = () => {
   useEffect(() => {
     const loadActiveRoutes = async () => {
       const routes = [];
-      let hasNewSignals = false;
-      const newSignalsMap = new Map();
+      const activeSignalsMap = new Map();
       
       for (const trip of activeTrips) {
         if (trip.route_id) {
@@ -62,27 +52,26 @@ const Dashboard = () => {
             const rData = await fetchRoute(trip.route_id);
             routes.push({ ...rData, positions: rData.polyline });
             if (rData.signals) {
-              hasNewSignals = true;
-              rData.signals.forEach(s => newSignalsMap.set(s.id, s));
+              rData.signals.forEach(s => activeSignalsMap.set(s.id, s));
             }
           } catch (e) {}
         }
       }
       setActiveRoutes(routes);
       
-      if (hasNewSignals) {
-        setSignals(prev => {
-          const map = new Map();
-          prev.forEach(s => map.set(s.id, s));
-          newSignalsMap.forEach((v, k) => map.set(k, v));
-          return Array.from(map.values());
+      setSignals(prev => {
+        const prevMap = new Map(prev.map(s => [s.id, s]));
+        return Array.from(activeSignalsMap.values()).map(s => {
+          const existing = prevMap.get(s.id);
+          return existing ? { ...s, current_state: existing.current_state } : s;
         });
-      }
+      });
     };
     if (activeTrips.length > 0) {
       loadActiveRoutes();
     } else {
       setActiveRoutes([]);
+      setSignals([]);
     }
   }, [activeTrips]);
 
@@ -137,7 +126,7 @@ const Dashboard = () => {
       setSignals(prev => prev.map(s => s.id === data.signalId ? { ...s, current_state: data.state } : s));
     }, []),
     'alert:new': useCallback((data) => {
-      setAlerts(prev => [data, ...prev].slice(0, 50));
+      setAlerts(prev => [normalizeAlert(data), ...prev].slice(0, 50));
     }, []),
     'trip:started': useCallback(() => {
       refreshTrips();

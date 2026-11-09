@@ -15,3 +15,8 @@ export const createCustomRoute = async (data) => {
   const response = await axios.post(`${API_BASE_URL}/routes/custom`, data);
   return response.data;
 };
+
+export const previewCustomRoute = async (data) => {
+  const response = await axios.post(`${API_BASE_URL}/routes/preview`, data);
+  return response.data;
+};

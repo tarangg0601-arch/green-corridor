@@ -6,6 +6,7 @@ const { getDB, saveDB } = require('../db/connection');
 const tripModel = require('../models/trip');
 const ambulanceModel = require('../models/ambulance');
 const signalService = require('./signalService');
+const signalCycleService = require('./signalCycleService');
 const logger = require('../utils/logger');
 const routingService = require('./routingService');
 const { run, queryOne, queryAll } = require('../db/helpers');
@@ -44,6 +45,7 @@ function startSimulation(tripData) {
   logger.info(`Starting simulation for trip ${tripId} (distance: ${totalDistance.toFixed(2)} km)`);
   sim.intervalId = setInterval(() => tick(sim), config.simulationTickMs);
   activeSimulations.set(tripId, sim);
+  signalCycleService.registerTripSignals(tripId, sim.signals.map(s => s.id));
 }
 
 function isSignalNeededByAnotherTrip(signalId, excludeTripId) {
@@ -61,7 +63,9 @@ function tick(sim) {
   sim.distanceTraveled += distanceIncrement;
 
   if (sim.distanceTraveled >= sim.totalDistance) {
-    completeTrip(sim.tripId);
+    completeTrip(sim.tripId).catch(err => {
+      logger.error(`Error in completeTrip for trip ${sim.tripId}: ${err.message}`);
+    });
     return;
   }
 
@@ -96,8 +100,12 @@ async function completeTrip(tripId) {
 
   const db = getDB();
   const trip = tripModel.getById(db, tripId);
+  if (!trip || trip.status !== 'active') {
+    activeSimulations.delete(tripId);
+    return;
+  }
   
-  if (trip && trip.phase === 'to_pickup') {
+  if (trip.phase === 'to_pickup') {
     logger.info(`Trip ${tripId} arrived at pickup. Transitioning to hospital route in 15s.`);
     tripModel.updatePhase(db, tripId, 'at_pickup');
 
@@ -125,6 +133,7 @@ async function completeTrip(tripId) {
         if (!currentTrip || currentTrip.status !== 'active' || currentTrip.phase !== 'at_pickup') {
           logger.info(`Trip ${tripId} is no longer active at pickup (status: ${currentTrip ? currentTrip.status : 'null'}). Aborting second leg.`);
           activeSimulations.delete(tripId);
+        signalCycleService.unregisterTripSignals(tripId);
           return;
         }
 
@@ -139,7 +148,15 @@ async function completeTrip(tripId) {
         if (!recheckTrip || recheckTrip.status !== 'active') {
           logger.info(`Trip ${tripId} was cancelled during hospital routing. Aborting leg 2.`);
           activeSimulations.delete(tripId);
+        signalCycleService.unregisterTripSignals(tripId);
           return;
+        }
+
+        if (config.maxRouteDistanceKm && routeData.distanceKm > config.maxRouteDistanceKm) {
+          const overLimitErr = new Error(`Hospital route is ${routeData.distanceKm.toFixed(1)} km; maximum is ${config.maxRouteDistanceKm} km`);
+          overLimitErr.statusCode = 422;
+          overLimitErr.isOverDistanceLimit = true;
+          throw overLimitErr;
         }
 
         const virtualSignals = routingService.generateVirtualSignals(routeData.polyline);
@@ -179,12 +196,16 @@ async function completeTrip(tripId) {
       } catch (err) {
         logger.error(`Failed to route to hospital for trip ${tripId}: ${err.message}`);
 
-        // If the trip was cancelled/stopped while routing, or request was aborted,
-        // do not overwrite the trip or ambulance state.
+        // Only treat as user cancellation if the trip was actually stopped/cancelled
+        // or the simulation's abortController was aborted by stopSimulation.
         const currentTripInCatch = tripModel.getById(db, tripId);
-        if (!currentTripInCatch || currentTripInCatch.status !== 'active' || (sim && sim.abortController && sim.abortController.signal.aborted) || err.message.includes('abort') || err.name === 'AbortError') {
-          logger.info(`Trip ${tripId} leg 2 routing failed or aborted (trip status: ${currentTripInCatch ? currentTripInCatch.status : 'not found'}).`);
+        const wasCancelledByUser = (sim && sim.abortController && sim.abortController.signal.aborted) ||
+                                  (!currentTripInCatch || currentTripInCatch.status !== 'active');
+
+        if (wasCancelledByUser) {
+          logger.info(`Trip ${tripId} leg 2 routing aborted due to user cancellation (trip status: ${currentTripInCatch ? currentTripInCatch.status : 'not found'}).`);
           activeSimulations.delete(tripId);
+        signalCycleService.unregisterTripSignals(tripId);
           return;
         }
 
@@ -204,6 +225,7 @@ async function completeTrip(tripId) {
           if (sim.timeoutId) clearTimeout(sim.timeoutId);
         }
         activeSimulations.delete(tripId);
+        signalCycleService.unregisterTripSignals(tripId);
 
         const now = new Date().toISOString();
         tripModel.updateStatus(db, tripId, 'cancelled', now);
@@ -212,7 +234,10 @@ async function completeTrip(tripId) {
 
         const io = getIO();
         if (io) {
-          io.emit('trip:ended', { tripId, reason: 'leg2_routing_failed' });
+          const reason = err.isOverDistanceLimit
+            ? 'leg2_distance_exceeded'
+            : (err.isTimeout ? 'leg2_routing_timeout' : 'leg2_routing_failed');
+          io.emit('trip:ended', { tripId, reason });
           io.emit('trip:updated', tripModel.getById(db, tripId));
         }
       }
@@ -221,6 +246,9 @@ async function completeTrip(tripId) {
   } else {
     activeSimulations.delete(tripId);
     tripModel.updateStatus(db, tripId, 'completed', new Date().toISOString());
+    if (trip.phase) {
+      tripModel.updatePhase(db, tripId, 'completed');
+    }
     ambulanceModel.updateStatus(db, sim.ambulanceId, 'idle');
     
     for (const signal of sim.signals) {
@@ -268,12 +296,14 @@ function stopSimulation(tripId) {
     }
 
     activeSimulations.delete(tripId);
+    signalCycleService.unregisterTripSignals(tripId);
     saveDB();
     logger.info(`Simulation stopped for trip ${tripId}`);
   }
 }
 
 function recoverInterruptedTrips(db) {
+  signalCycleService.reset();
   const activeTrips = queryAll(db, "SELECT * FROM trips WHERE status = 'active'");
   if (activeTrips.length > 0) {
     const now = new Date().toISOString();

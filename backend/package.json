@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "description": "Smart traffic management backend — simulation engine, REST API, and WebSocket server",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=18.19.0"
+  },
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "test": "node tests/regression-cancel-during-routing.js"
+    "test": "node --test"
   },
   "dependencies": {
     "cors": "^2.8.5",

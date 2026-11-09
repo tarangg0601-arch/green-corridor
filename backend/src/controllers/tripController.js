@@ -21,7 +21,11 @@ exports.list = (req, res) => {
 exports.getById = (req, res) => {
   try {
     const db = getDB();
-    const item = tripModel.getById(db, parseInt(req.params.id));
+    const tripId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(tripId)) {
+      return res.status(400).json({ error: 'Valid trip id required' });
+    }
+    const item = tripModel.getById(db, tripId);
     if (!item) return res.status(404).json({ error: 'Trip not found' });
     res.json(item);
   } catch (err) {
@@ -33,27 +37,27 @@ exports.start = (req, res) => {
   try {
     const db = getDB();
     const { ambulanceId, routeId } = req.body;
-    const ambId = parseInt(ambulanceId);
-    const rId = parseInt(routeId);
+    const ambId = parseInt(ambulanceId, 10);
+    const rId = parseInt(routeId, 10);
     if (!Number.isFinite(ambId) || !Number.isFinite(rId)) {
       return res.status(400).json({ error: 'Valid ambulanceId and routeId required' });
     }
 
     const ambulance = ambulanceModel.getById(db, ambId);
     if (!ambulance) return res.status(404).json({ error: 'Ambulance not found' });
-    if (ambulance.status !== 'idle') return res.status(400).json({ error: 'Ambulance is not idle' });
+    if (ambulance.status !== 'idle') return res.status(409).json({ error: 'Ambulance is not idle' });
 
     const route = routeModel.getById(db, rId);
     if (!route) return res.status(404).json({ error: 'Route not found' });
 
     const trip = tripModel.create(db, { ambulanceId: ambId, routeId: rId });
-    ambulanceModel.updateStatus(db, ambulanceId, 'en_route');
+    ambulanceModel.updateStatus(db, ambId, 'en_route');
     saveDB();
 
     simulationService.startSimulation({
       tripId: trip.id,
-      ambulanceId,
-      routeId,
+      ambulanceId: ambId,
+      routeId: rId,
       polyline: route.polyline,
       signals: route.signals,
       vehicleNumber: ambulance.vehicle_number
@@ -74,12 +78,12 @@ exports.start = (req, res) => {
 exports.stop = (req, res) => {
   try {
     const db = getDB();
-    const tripId = parseInt(req.params.id);
+    const tripId = parseInt(req.params.id, 10);
     if (!Number.isFinite(tripId)) return res.status(400).json({ error: 'Valid trip id required' });
 
     const trip = tripModel.getById(db, tripId);
     if (!trip) return res.status(404).json({ error: 'Trip not found' });
-    if (trip.status !== 'active') return res.status(400).json({ error: 'Trip is not active' });
+    if (trip.status !== 'active') return res.status(409).json({ error: 'Trip is not active' });
 
     tripModel.updateStatus(db, trip.id, 'cancelled', new Date().toISOString());
     ambulanceModel.updateStatus(db, trip.ambulance_id, 'idle');

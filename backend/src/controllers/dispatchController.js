@@ -8,6 +8,7 @@ const ambulanceModel = require('../models/ambulance');
 const geo = require('../utils/geo');
 const { getIO } = require('../socketManager');
 const logger = require('../utils/logger');
+const config = require('../config');
 
 function parseCoordinate(val, min, max) {
   if (val === undefined || val === null || val === '') return null;
@@ -18,8 +19,11 @@ function parseCoordinate(val, min, max) {
 }
 
 exports.callAmbulance = async (req, res) => {
+  let reservedAmb = null;
+  let tripStarted = false;
+  const db = getDB();
+
   try {
-    const db = getDB();
     const { address, lat, lng } = req.body;
 
     const parsedLat = parseCoordinate(lat, -90, 90);
@@ -58,7 +62,7 @@ exports.callAmbulance = async (req, res) => {
 
     // 2. Find nearest idle ambulance (approximate ambulance location as its base hospital)
     const idleAmbs = queryAll(db, "SELECT * FROM ambulances WHERE status = 'idle'");
-    if (idleAmbs.length === 0) return res.status(404).json({ error: 'No idle ambulances available' });
+    if (idleAmbs.length === 0) return res.status(409).json({ error: 'No idle ambulances available' });
 
     let nearestAmb = null;
     let minAmbDist = Infinity;
@@ -79,23 +83,23 @@ exports.callAmbulance = async (req, res) => {
       }
     });
 
-    if (!nearestAmb) return res.status(500).json({ error: 'Could not determine ambulance location' });
+    if (!nearestAmb) return res.status(409).json({ error: 'No available ambulances with recognized base hospitals found' });
 
     // Mark as en_route immediately to prevent concurrent dispatch race conditions
+    reservedAmb = nearestAmb;
     ambulanceModel.updateStatus(db, nearestAmb.id, 'en_route');
     saveDB();
 
-    let routeData;
-    let virtualSignals;
-    try {
-      // 3. Leg 1: Route from ambulance base to pickup
-      routeData = await routingService.getRoute(ambBaseLat, ambBaseLng, pickup.lat, pickup.lng);
-      virtualSignals = routingService.generateVirtualSignals(routeData.polyline);
-    } catch (routeErr) {
-      ambulanceModel.updateStatus(db, nearestAmb.id, 'idle');
-      saveDB();
-      throw new Error('Routing failed: ' + routeErr.message);
+    // 3. Leg 1: Route from ambulance base to pickup
+    const routeData = await routingService.getRoute(ambBaseLat, ambBaseLng, pickup.lat, pickup.lng);
+
+    if (config.maxRouteDistanceKm && routeData.distanceKm > config.maxRouteDistanceKm) {
+      const err = new Error(`Route is ${routeData.distanceKm.toFixed(1)} km; maximum is ${config.maxRouteDistanceKm} km`);
+      err.statusCode = 422;
+      throw err;
     }
+
+    const virtualSignals = routingService.generateVirtualSignals(routeData.polyline);
 
     const routeName = `Dispatch to ${pickup.displayName.split(',')[0]}`;
     const info = run(db,
@@ -120,9 +124,6 @@ exports.callAmbulance = async (req, res) => {
     );
     const tripId = tripInfo.lastInsertRowid;
 
-    ambulanceModel.updateStatus(db, nearestAmb.id, 'en_route');
-    saveDB();
-
     const trip = tripModel.getById(db, tripId);
 
     // 5. Start Simulation
@@ -135,6 +136,8 @@ exports.callAmbulance = async (req, res) => {
       vehicleNumber: nearestAmb.vehicle_number
     });
 
+    tripStarted = true;
+
     const io = getIO();
     if (io) {
       io.emit('trip:started', trip);
@@ -143,6 +146,17 @@ exports.callAmbulance = async (req, res) => {
     res.status(201).json(trip);
   } catch (err) {
     logger.error(`Dispatch failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    // If ambulance was reserved but trip was not successfully started, revert to idle
+    if (reservedAmb && !tripStarted) {
+      try {
+        ambulanceModel.updateStatus(db, reservedAmb.id, 'idle');
+        saveDB();
+        logger.info(`Reverted ambulance ${reservedAmb.id} back to idle after dispatch failure.`);
+      } catch (cleanupErr) {
+        logger.error(`Failed to revert ambulance status: ${cleanupErr.message}`);
+      }
+    }
+    const statusCode = err.statusCode || (err.isTimeout ? 504 : 500);
+    res.status(statusCode).json({ error: err.message });
   }
 };

@@ -1,6 +1,7 @@
 const config = require('../config');
 const { getDB, saveDB } = require('../db/connection');
 const signalService = require('./signalService');
+const signalCycleService = require('./signalCycleService');
 const alertService = require('./alertService');
 const priorityEventModel = require('../models/priorityEvent');
 const logger = require('../utils/logger');
@@ -25,6 +26,7 @@ function processSignals(sim, checkSignalNeededFn) {
         if (!checkSignalNeededFn || !checkSignalNeededFn(signal.id)) {
           signalService.revertSignal(signal.id);
         }
+        signalCycleService.setPriority(signal.id, sim.tripId, false);
         signal.isGreenForTrip = false;
       }
       continue;
@@ -42,6 +44,7 @@ function processSignals(sim, checkSignalNeededFn) {
       // Trigger priority if within threshold and not already triggered for this trip
       if (etaSeconds <= config.priorityThresholdSeconds && !signal.triggeredForTrip) {
         signalService.triggerPriority(signal.id);
+        signalCycleService.setPriority(signal.id, sim.tripId, true);
         signal.isGreenForTrip = true;
         signal.triggeredForTrip = true;
 

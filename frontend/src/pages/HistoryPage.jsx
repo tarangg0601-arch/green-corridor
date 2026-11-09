@@ -45,6 +45,8 @@ const HistoryPage = () => {
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ambulance</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Route</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Destination</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Signals Cleared</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Time</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
@@ -52,12 +54,14 @@ const HistoryPage = () => {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {trips.length === 0 ? (
-              <tr><td colSpan="5" className="px-6 py-4 text-center text-gray-500">No past trips found.</td></tr>
+              <tr><td colSpan="7" className="px-6 py-4 text-center text-gray-500">No past trips found.</td></tr>
             ) : (
               trips.map(trip => (
                 <tr key={trip.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{trip.vehicle_number}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{trip.route_name}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{trip.dest_hospital_name || '-'}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-semibold">{trip.signals_prioritized ?? 0}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
                       trip.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'

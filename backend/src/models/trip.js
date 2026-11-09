@@ -3,7 +3,8 @@ const { queryAll, queryOne, run } = require('../db/helpers');
 module.exports = {
   getAll: (db, statusFilter) => {
     let query = `
-      SELECT t.*, a.vehicle_number, a.driver_name, a.hospital, r.name as route_name, r.id as rid, h.name as dest_hospital_name
+      SELECT t.*, a.vehicle_number, a.driver_name, a.hospital, r.name as route_name, r.id as rid, h.name as dest_hospital_name,
+        (SELECT COUNT(*) FROM priority_events p WHERE p.trip_id = t.id) as signals_prioritized
       FROM trips t
       JOIN ambulances a ON t.ambulance_id = a.id
       JOIN routes r ON t.route_id = r.id
@@ -19,7 +20,8 @@ module.exports = {
   },
   getById: (db, id) => {
     const trip = queryOne(db, `
-      SELECT t.*, a.vehicle_number, a.driver_name, a.hospital, r.name as route_name, r.id as rid, h.name as dest_hospital_name
+      SELECT t.*, a.vehicle_number, a.driver_name, a.hospital, r.name as route_name, r.id as rid, h.name as dest_hospital_name,
+        (SELECT COUNT(*) FROM priority_events p WHERE p.trip_id = t.id) as signals_prioritized
       FROM trips t
       JOIN ambulances a ON t.ambulance_id = a.id
       JOIN routes r ON t.route_id = r.id

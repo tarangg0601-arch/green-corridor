@@ -31,14 +31,21 @@ const AnalyticsPage = () => {
     <div className="p-6 max-w-6xl mx-auto w-full h-full overflow-y-auto custom-scrollbar">
       <h1 className="text-2xl font-bold text-gc-dark mb-6">System Analytics</h1>
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div className="bg-white p-6 rounded-lg shadow border-t-4 border-blue-500">
-          <h3 className="text-gray-500 text-sm font-medium uppercase tracking-wider mb-1">Total Trips Facilitated</h3>
-          <p className="text-3xl font-bold text-gray-900">{data?.total_trips || 0}</p>
+          <h3 className="text-gray-500 text-sm font-medium uppercase tracking-wider mb-1">Trips Facilitated</h3>
+          <p className="text-3xl font-bold text-gray-900">{data?.completed_trips ?? data?.total_trips ?? 0}</p>
+          <p className="text-xs text-gray-400 mt-1">Completed corridors</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow border-t-4 border-amber-500">
+          <h3 className="text-gray-500 text-sm font-medium uppercase tracking-wider mb-1">Cancelled Trips</h3>
+          <p className="text-3xl font-bold text-gray-900">{data?.cancelled_trips || 0}</p>
+          <p className="text-xs text-gray-400 mt-1">Aborted corridors</p>
         </div>
         <div className="bg-white p-6 rounded-lg shadow border-t-4 border-gc-green">
           <h3 className="text-gray-500 text-sm font-medium uppercase tracking-wider mb-1">Signals Prioritized</h3>
           <p className="text-3xl font-bold text-gray-900">{data?.total_signals_prioritized || 0}</p>
+          <p className="text-xs text-gray-400 mt-1">Real-time green preemption</p>
         </div>
         <div className="bg-white p-6 rounded-lg shadow border-t-4 border-orange-500">
           <h3 className="text-gray-500 text-sm font-medium uppercase tracking-wider mb-1">Estimated Time Saved</h3>
